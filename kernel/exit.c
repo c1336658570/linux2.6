@@ -79,6 +79,11 @@ static void __unhash_process(struct task_struct *p)
  */
 static void __exit_signal(struct task_struct *tsk)
 {
+	/*
+	 * 此函数调用__unhash_process(),__unhash_process()又调用detach_pid()从pidhash上删除该进程，
+	 * 同时也要从任务列表中删除该进程
+	 * __exit_signal()释放目前僵死进程所使用的所有剩余资源，并进行最终统计和记录。
+	 */
 	struct signal_struct *sig = tsk->signal;
 	struct sighand_struct *sighand;
 
@@ -164,7 +169,7 @@ static void delayed_put_task_struct(struct rcu_head *rhp)
 	put_task_struct(tsk);
 }
 
-
+// 当最终需要释放进程描述符，此函数会被调用
 void release_task(struct task_struct * p)
 {
 	struct task_struct *leader;
@@ -181,6 +186,11 @@ repeat:
 
 	write_lock_irq(&tasklist_lock);
 	tracehook_finish_release_task(p);
+	/*
+	 * 调用此函数，此函数调用__unhash_process(),__unhash_process()又调用detach_pid()从pidhash上删除该进程，
+	 * 同时也要从任务列表中删除该进程
+	 * __exit_signal()释放目前僵死进程所使用的所有剩余资源，并进行最终统计和记录。
+	 */
 	__exit_signal(p);
 
 	/*
@@ -190,6 +200,7 @@ repeat:
 	 */
 	zap_leader = 0;
 	leader = p->group_leader;
+	// 如果这个进程是线程组最后一个进程，并且领头进程已经死掉，那么就要通知僵死的领头进程的父进程
 	if (leader != p && thread_group_empty(leader) && leader->exit_state == EXIT_ZOMBIE) {
 		BUG_ON(task_detached(leader));
 		do_notify_parent(leader, leader->exit_signal);
@@ -213,6 +224,7 @@ repeat:
 
 	write_unlock_irq(&tasklist_lock);
 	release_thread(p);
+	// 释放进程内核栈和thread_info结构所占的页，并释放task_struct所占的slab高速缓存
 	call_rcu(&p->rcu, delayed_put_task_struct);
 
 	p = leader;
@@ -711,6 +723,8 @@ static void exit_mm(struct task_struct * tsk)
  */
 static struct task_struct *find_new_reaper(struct task_struct *father)
 {
+	// 此函数会来给父进程已经退出的进程找父进程
+	// 先找进程所在线程组的其他进程。如果没有其他进程，就找init进程并返回。
 	struct pid_namespace *pid_ns = task_active_pid_ns(father);
 	struct task_struct *thread;
 
@@ -774,6 +788,7 @@ static void reparent_leader(struct task_struct *father, struct task_struct *p,
 	kill_orphaned_pgrp(p, father);
 }
 
+// 此函数会调用find_new_reaper()来给父进程已经退出的进程找父进程
 static void forget_original_parent(struct task_struct *father)
 {
 	struct task_struct *p, *n, *reaper;
@@ -782,8 +797,9 @@ static void forget_original_parent(struct task_struct *father)
 	exit_ptrace(father);
 
 	write_lock_irq(&tasklist_lock);
-	reaper = find_new_reaper(father);
+	reaper = find_new_reaper(father);		// 找父进程
 
+	// 遍历所有子进程并给它们设置父进程
 	list_for_each_entry_safe(p, n, &father->children, sibling) {
 		struct task_struct *t = p;
 		do {
@@ -825,7 +841,7 @@ static void exit_notify(struct task_struct *tsk, int group_dead)
 	 *	as a result of our exiting, and if they have any stopped
 	 *	jobs, send them a SIGHUP and then a SIGCONT.  (POSIX 3.2.2.2)
 	 */
-	forget_original_parent(tsk);
+	forget_original_parent(tsk);	// 此函数会调用find_new_reaper()来给父进程已经退出的进程找父进程
 	exit_task_namespaces(tsk);
 
 	write_lock_irq(&tasklist_lock);
@@ -897,6 +913,7 @@ static void check_stack_usage(void)
 static inline void check_stack_usage(void) {}
 #endif
 
+// 退出进程
 NORET_TYPE void do_exit(long code)
 {
 	struct task_struct *tsk = current;
@@ -938,6 +955,7 @@ NORET_TYPE void do_exit(long code)
 
 	exit_irq_thread();
 
+	// 将task_struct中的标志成员设置为PF_EXITING
 	exit_signals(tsk);  /* sets PF_EXITING */
 	/*
 	 * tsk->flags are checked in the futex code to protect against
@@ -951,6 +969,7 @@ NORET_TYPE void do_exit(long code)
 				current->comm, task_pid_nr(current),
 				preempt_count());
 
+	// 如果BSD的进程记账功能是开启的，do_exit()调用acct_update_integrals()来输出记账信息
 	acct_update_integrals(tsk);
 	/* sync mm's RSS info before statistics gathering */
 	if (tsk->mm)
@@ -971,14 +990,18 @@ NORET_TYPE void do_exit(long code)
 	tsk->exit_code = code;
 	taskstats_exit(tsk, group_dead);
 
+	// 释放进程占用的mm_struct，如果无其他进程使用（也就是此地址空间没被共享），就彻底释放
 	exit_mm(tsk);
 
 	if (group_dead)
 		acct_process();
 	trace_sched_process_exit(tsk);
 
+	// 如果进程排队等待IPC信号，它则离开队列
 	exit_sem(tsk);
+	// 递减文件描述符
 	exit_files(tsk);
+	// 递减文件系统数据的引用计数，如果某个引用计数为0,即没有进程使用，则释放相应资源
 	exit_fs(tsk);
 	check_stack_usage();
 	exit_thread();
@@ -1001,6 +1024,7 @@ NORET_TYPE void do_exit(long code)
 	 */
 	perf_event_exit_task(tsk);
 
+	// 向父进程发送信号，给子进程找养父，养父为线程组其他进程或init进程，并将进程状态设置为EXIT_ZOMBIE
 	exit_notify(tsk, group_dead);
 #ifdef CONFIG_NUMA
 	mpol_put(tsk->mempolicy);
@@ -1033,7 +1057,7 @@ NORET_TYPE void do_exit(long code)
 	exit_rcu();
 	/* causes final put_task_struct in finish_task_switch(). */
 	tsk->state = TASK_DEAD;
-	schedule();
+	schedule();		// 调用schedule切换到新进程，EXIT_ZOMBIE永远不会被调度，所以这是最后一行，do_exit永远不会返回
 	BUG();
 	/* Avoid "noreturn function does return".  */
 	for (;;)
@@ -1536,7 +1560,7 @@ static int wait_consider_task(struct wait_opts *wo, int ptrace,
 	 * We don't reap group leaders with subthreads.
 	 */
 	if (p->exit_state == EXIT_ZOMBIE && !delay_group_leader(p))
-		return wait_task_zombie(wo, p);
+		return wait_task_zombie(wo, p);		// 调用wait_task_zombie，其中调用release_task
 
 	/*
 	 * It's stopped or running now, so it might
@@ -1564,7 +1588,7 @@ static int do_wait_thread(struct wait_opts *wo, struct task_struct *tsk)
 	struct task_struct *p;
 
 	list_for_each_entry(p, &tsk->children, sibling) {
-		int ret = wait_consider_task(wo, 0, p);
+		int ret = wait_consider_task(wo, 0, p);		// 调用wait_consider_task，其中调用wait_task_zombie
 		if (ret)
 			return ret;
 	}
@@ -1577,7 +1601,7 @@ static int ptrace_do_wait(struct wait_opts *wo, struct task_struct *tsk)
 	struct task_struct *p;
 
 	list_for_each_entry(p, &tsk->ptraced, ptrace_entry) {
-		int ret = wait_consider_task(wo, 1, p);
+		int ret = wait_consider_task(wo, 1, p);		// 调用wait_consider_task，其中调用wait_task_zombie
 		if (ret)
 			return ret;
 	}
@@ -1633,11 +1657,11 @@ repeat:
 	read_lock(&tasklist_lock);
 	tsk = current;
 	do {
-		retval = do_wait_thread(wo, tsk);
+		retval = do_wait_thread(wo, tsk);		// 调用do_wait_thread，其中调用wait_consider_task
 		if (retval)
 			goto end;
 
-		retval = ptrace_do_wait(wo, tsk);
+		retval = ptrace_do_wait(wo, tsk);		// 调用ptrace_do_wait，其中调用wait_consider_task
 		if (retval)
 			goto end;
 

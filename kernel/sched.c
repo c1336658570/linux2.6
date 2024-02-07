@@ -362,8 +362,8 @@ struct cfs_rq {
 	u64 exec_clock;
 	u64 min_vruntime;
 
-	struct rb_root tasks_timeline;
-	struct rb_node *rb_leftmost;
+	struct rb_root tasks_timeline;		// 红黑树根节点
+	struct rb_node *rb_leftmost;			// 最左下角的节点，即vruntime最小的节点
 
 	struct list_head tasks;
 	struct list_head *balance_iterator;
@@ -418,8 +418,9 @@ struct cfs_rq {
 };
 
 /* Real-Time classes' related field in a runqueue: */
+// 实时运行队列
 struct rt_rq {
-	struct rt_prio_array active;
+	struct rt_prio_array active;		// 优先级数组
 	unsigned long rt_nr_running;
 #if defined CONFIG_SMP || defined CONFIG_RT_GROUP_SCHED
 	struct {
@@ -491,6 +492,13 @@ static struct root_domain def_root_domain;
  * (such as the load balancing or the thread migration code), lock
  * acquire operations must be ordered by ascending &runqueue.
  */
+/*
+ * 这是主 per-CPU 运行队列的数据结构。
+ * 
+ * 锁定规则:那些想要锁多个运行队列的地方(例如负载均衡或者线程迁移代码),锁定获取操作必须按升序排列&runqueue。
+ * 即,如果一个地方需要同时锁定运行队列rq0和rq1,则必须先锁rq0,再锁rq1。这是为了避免死锁。
+ * 那些需要同时操作多个运行队列的代码,必须遵守这个顺序锁定规则。
+ */
 struct rq {
 	/* runqueue lock: */
 	raw_spinlock_t lock;
@@ -510,8 +518,8 @@ struct rq {
 	unsigned long nr_load_updates;
 	u64 nr_switches;
 
-	struct cfs_rq cfs;
-	struct rt_rq rt;
+	struct cfs_rq cfs;		// 完全公平调度队列
+	struct rt_rq rt;			// 实时调度队列
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	/* list of leaf cfs_rq on this cpu: */
@@ -2368,6 +2376,8 @@ int select_task_rq(struct task_struct *p, int sd_flags, int wake_flags)
 static int try_to_wake_up(struct task_struct *p, unsigned int state,
 			  int wake_flags)
 {
+	// 将进程设置为TASK_RUNNING状态，调用enqueue_task()将此进程放入红黑树中。
+	// 如果被唤醒进程比当前正在执行进程的优先级高，还要设置need_resched标志。need_resched标志表明是否需要重新执行一次调度
 	int cpu, orig_cpu, this_cpu, success = 0;
 	unsigned long flags;
 	struct rq *rq;
@@ -2480,7 +2490,7 @@ out_running:
 	trace_sched_wakeup(rq, p, success);
 	check_preempt_curr(rq, p, wake_flags);
 
-	p->state = TASK_RUNNING;
+	p->state = TASK_RUNNING;		// 修改进程状态为TASK_RUNNING
 #ifdef CONFIG_SMP
 	if (p->sched_class->task_woken)
 		p->sched_class->task_woken(rq, p);
@@ -2905,6 +2915,7 @@ static inline void
 context_switch(struct rq *rq, struct task_struct *prev,
 	       struct task_struct *next)
 {
+	// 负责上下文切换
 	struct mm_struct *mm, *oldmm;
 
 	prepare_task_switch(rq, prev, next);
@@ -2923,7 +2934,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
 		atomic_inc(&oldmm->mm_count);
 		enter_lazy_tlb(oldmm, next);
 	} else
-		switch_mm(oldmm, mm, next);
+		switch_mm(oldmm, mm, next);		// 将虚拟内存从上一个进程映射切换到新进程
 
 	if (likely(!prev->mm)) {
 		prev->active_mm = NULL;
@@ -2940,7 +2951,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
 #endif
 
 	/* Here we just switch the register state and the stack. */
-	switch_to(prev, next, prev);
+	switch_to(prev, next, prev);		// 调用switch_to，从上一个进程的处理器状态切换到新进程的处理器状态。保存、恢复各寄存器
 
 	barrier();
 	/*
@@ -3663,6 +3674,8 @@ static void put_prev_task(struct rq *rq, struct task_struct *prev)
 /*
  * Pick up the highest-prio task:
  */
+// 挑选最高优先级的任务
+// 以优先级为序，从高到低，依次检查每一个调度类，并从优先级最高的调度类中选择最高优先级的进程
 static inline struct task_struct *
 pick_next_task(struct rq *rq)
 {
@@ -3673,8 +3686,10 @@ pick_next_task(struct rq *rq)
 	 * Optimization: we know that if all tasks are in
 	 * the fair class we can call that function directly:
 	 */
+	// 优化：我们知道如果所有任务都在公平调度类，那么就可以直接调用那个函数
 	if (likely(rq->nr_running == rq->cfs.nr_running)) {
-		p = fair_sched_class.pick_next_task(rq);
+		// 每一个调度类都有自己的一系列函数
+		p = fair_sched_class.pick_next_task(rq);	// pick_next_task函数会返回下一个可运行进程的指针，或者返回NULL。
 		if (likely(p))
 			return p;
 	}
@@ -3688,6 +3703,7 @@ pick_next_task(struct rq *rq)
 		 * Will never be NULL as the idle class always
 		 * returns a non-NULL p:
 		 */
+		// 永远不会为NULL，因为idle类总会返回非NULL的p
 		class = class->next;
 	}
 }
@@ -3695,6 +3711,8 @@ pick_next_task(struct rq *rq)
 /*
  * schedule() is the main scheduler function.
  */
+// 内核其他部分用于调度进程调度器的入口，选择哪个进程可以运行，何时投入运行。
+// 找到一个优先级最高的调度类，该调度类要有自己的运行队列，然后问谁才是下一个该运行的进程
 asmlinkage void __sched schedule(void)
 {
 	struct task_struct *prev, *next;
@@ -3736,7 +3754,7 @@ need_resched_nonpreemptible:
 		idle_balance(cpu, rq);
 
 	put_prev_task(rq, prev);
-	next = pick_next_task(rq);
+	next = pick_next_task(rq);		// 以优先级为序，从高到低，依次检查每一个调度类，并从优先级最高的调度类中选择最高优先级的进程
 
 	if (likely(prev != next)) {
 		sched_info_switch(prev, next);
@@ -3892,10 +3910,11 @@ asmlinkage void __sched preempt_schedule_irq(void)
 
 #endif /* CONFIG_PREEMPT */
 
+// 等待队列的默认唤醒函数，使用DECLARE_WAITQUEUE定义等待队列默认函数是这个函数，等待队列的定义方式在wait.h中
 int default_wake_function(wait_queue_t *curr, unsigned mode, int wake_flags,
 			  void *key)
 {
-	return try_to_wake_up(curr->private, mode, wake_flags);
+	return try_to_wake_up(curr->private, mode, wake_flags);		// 调用try_to_wake_up()唤醒等待队列上的进程
 }
 EXPORT_SYMBOL(default_wake_function);
 

@@ -23,12 +23,23 @@ struct exec_domain;
 #include <asm/ftrace.h>
 #include <asm/atomic.h>
 
+// 在内核栈尾端创建一个thread_info，用来指向task_struct，task_struct通过slab分配器动态分配，就不需要在栈中分配了
 struct thread_info {
-	struct task_struct	*task;		/* main task structure */
+	struct task_struct	*task;		/* main task structure */		// 指向该进程的task_struct
 	struct exec_domain	*exec_domain;	/* execution domain */
-	__u32			flags;		/* low level flags */
+	__u32			flags;		/* low level flags */		// 其中有一位来表示need_resched，表示需要重新执行一次调度（schedule）
 	__u32			status;		/* thread synchronous flags */
 	__u32			cpu;		/* current CPU */
+	// 当使用锁此值加1,释放锁此值减1。数值为0的时候，内核就可以执行抢占。从中断返回内核空间时，内核会检查need_resched和
+	//preempt_count的值。如果need_resched被设置并且preempt_count为0的话，说明有一个更重要的任务需要执行，此时可以安全的抢占，调度程序会被执行。
+	// 如果此时preempt_count不为0,说明当前任务持有锁，所以抢占是不安全的。此时，内核就会向通常那样直接从中断返回当前执行进程。
+	// 如果当前锁都被释放，preempt_count就会重新为0。此时，释放锁的代码会检查need_resched是否被设置。如果是的话，就会执行调度程序。
+	// 如果内核进程被阻塞，或主动调用schedule()，那么内核抢占也会显示发生。
+	// 内核抢占发生在：
+	// 中断处理程序正在执行，且返回内核空间之前
+	// 内核代码再一次具有可抢占性的时候
+	// 如果内核中任务显式调用schedule
+	// 内核中的任务阻塞
 	int			preempt_count;	/* 0 => preemptable,
 						   <0 => BUG */
 	mm_segment_t		addr_limit;
@@ -212,9 +223,20 @@ static inline struct thread_info *current_thread_info(void)
 #ifndef __ASSEMBLY__
 DECLARE_PER_CPU(unsigned long, kernel_stack);
 
+// 获取内核栈中存储的thread_info，然后可以通过thread_info来找到task_struct
+/*
+ * 对应汇编如下，假定内核栈是8KB，如果内核栈是4KB，就需要改为4096：
+ * movl $-8192, %eax
+ * andl %esp, %eax
+ */
 static inline struct thread_info *current_thread_info(void)
 {
 	struct thread_info *ti;
+	/*
+	 * 获取当前CPU内核栈地址
+	 * percpu_read_stable可以在当前CPU上读取per_cpu变量的值
+	 * kernel_stack是一个per_cpu变量,保存每个CPU对应的内核栈的起始地址
+	 */
 	ti = (void *)(percpu_read_stable(kernel_stack) +
 		      KERNEL_STACK_OFFSET - THREAD_SIZE);
 	return ti;

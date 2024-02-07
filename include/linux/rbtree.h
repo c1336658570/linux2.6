@@ -137,6 +137,7 @@ static inline void rb_set_color(struct rb_node *rb, int color)
 #define RB_CLEAR_NODE(node)	(rb_set_parent(node, node))
 
 extern void rb_insert_color(struct rb_node *, struct rb_root *);
+// 从红黑树删除节点
 extern void rb_erase(struct rb_node *, struct rb_root *);
 
 /* Find logical next and previous nodes in a tree */

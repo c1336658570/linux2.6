@@ -227,6 +227,7 @@ int __attribute__((weak)) arch_dup_task_struct(struct task_struct *dst,
 	return 0;
 }
 
+// 为新进程创建一个内核栈，thread_info结构和task_struct，此值与父进程完全相同
 static struct task_struct *dup_task_struct(struct task_struct *orig)
 {
 	struct task_struct *tsk;
@@ -579,6 +580,7 @@ EXPORT_SYMBOL_GPL(get_task_mm);
  */
 void mm_release(struct task_struct *tsk, struct mm_struct *mm)
 {
+	// 在调用mm_release()时，会检查vfork_done是否为空，如果不为空，则回向父进程发送信号，唤醒父进程
 	struct completion *vfork_done = tsk->vfork_done;
 
 	/* Get rid of any futexes when releasing the mm */
@@ -602,6 +604,7 @@ void mm_release(struct task_struct *tsk, struct mm_struct *mm)
 
 	/* notify parent sleeping on vfork() */
 	if (vfork_done) {
+	// 在调用mm_release()时，会检查vfork_done是否为空，如果不为空，则回向父进程发送信号，唤醒父进程
 		tsk->vfork_done = NULL;
 		complete(vfork_done);
 	}
@@ -896,6 +899,7 @@ void __cleanup_signal(struct signal_struct *sig)
 	kmem_cache_free(signal_cachep, sig);
 }
 
+// 更新task_struct的flags成员，表明进程是否拥有用户权限的PF_SUPERPRIV标志被清零，表明进程还没有调用exec()函数的PF_FORKNOEXEC标志被设置
 static void copy_flags(unsigned long clone_flags, struct task_struct *p)
 {
 	unsigned long new_flags = p->flags;
@@ -996,7 +1000,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		goto fork_out;
 
 	retval = -ENOMEM;
-	p = dup_task_struct(current);
+	p = dup_task_struct(current);		// 为新进程创建一个内核栈，thread_info结构和task_struct，此值与父进程完全相同
 	if (!p)
 		goto fork_out;
 
@@ -1034,11 +1038,11 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 
 	p->did_exec = 0;
 	delayacct_tsk_init(p);	/* Must remain after dup_task_struct() */
-	copy_flags(clone_flags, p);
+	copy_flags(clone_flags, p);		// 更新task_struct的flags成员，表明进程是否拥有用户权限的PF_SUPERPRIV标志被清零，表明进程还没有调用exec()函数的PF_FORKNOEXEC标志被设置
 	INIT_LIST_HEAD(&p->children);
 	INIT_LIST_HEAD(&p->sibling);
 	rcu_copy_process(p);
-	p->vfork_done = NULL;
+	p->vfork_done = NULL;		// 将vfork_done设置为NULL，如果是vfork的话，会在do_fork中将vfork_done指向特殊的地址
 	spin_lock_init(&p->alloc_lock);
 
 	init_sigpending(&p->pending);
@@ -1121,6 +1125,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	if (retval)
 		goto bad_fork_cleanup_policy;
 
+	// 根据传递的clone()的参数标志，拷贝或共享打开的文件、文件系统信息、信号处理函数、进程地址空间和命名空间等。
 	if ((retval = audit_alloc(p)))
 		goto bad_fork_cleanup_policy;
 	/* copy all the process information */
@@ -1146,7 +1151,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 
 	if (pid != &init_struct_pid) {
 		retval = -ENOMEM;
-		pid = alloc_pid(p->nsproxy->pid_ns);
+		pid = alloc_pid(p->nsproxy->pid_ns);		// 分配一个有效PID
 		if (!pid)
 			goto bad_fork_cleanup_io;
 
@@ -1320,7 +1325,7 @@ bad_fork_cleanup_count:
 bad_fork_free:
 	free_task(p);
 fork_out:
-	return ERR_PTR(retval);
+	return ERR_PTR(retval);		// 返回指向task_struct的指针
 }
 
 noinline struct pt_regs * __cpuinit __attribute__((weak)) idle_regs(struct pt_regs *regs)
@@ -1348,6 +1353,7 @@ struct task_struct * __cpuinit fork_idle(int cpu)
  * It copies the process, and if successful kick-starts
  * it and waits for it to finish using the VM if required.
  */
+// 完成fork工作的主要函数，fork调用clone，clone调用do_fork
 long do_fork(unsigned long clone_flags,
 	      unsigned long stack_start,
 	      struct pt_regs *regs,
@@ -1398,7 +1404,7 @@ long do_fork(unsigned long clone_flags,
 		trace = tracehook_prepare_clone(clone_flags);
 
 	p = copy_process(clone_flags, stack_start, regs, stack_size,
-			 child_tidptr, NULL, trace);
+			 child_tidptr, NULL, trace);	// 复制进程
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
 	 * might get invalid after that point, if the thread exits quickly.
@@ -1414,6 +1420,8 @@ long do_fork(unsigned long clone_flags,
 			put_user(nr, parent_tidptr);
 
 		if (clone_flags & CLONE_VFORK) {
+			// 如果是vfork，vfork_done会指向一个特定地址，子进程先执行，父进程等待子进程通过vfork_done发送信号才开始执行
+			// 在调用mm_release()时，会检查vfork_done是否为空，如果不为空，则回向父进程发送信号
 			p->vfork_done = &vfork;
 			init_completion(&vfork);
 		}

@@ -1738,7 +1738,7 @@ static const struct sched_class rt_sched_class = {
 
 	.check_preempt_curr	= check_preempt_curr_rt,
 
-	.pick_next_task		= pick_next_task_rt,
+	.pick_next_task		= pick_next_task_rt,		// 选择下一个上cpu的task
 	.put_prev_task		= put_prev_task_rt,
 
 #ifdef CONFIG_SMP

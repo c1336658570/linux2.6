@@ -325,6 +325,7 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq)
 /*
  * Enqueue an entity into the rb-tree:
  */
+// 将se（调度实体）插入cfs_rq的红黑树中
 static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	struct rb_node **link = &cfs_rq->tasks_timeline.rb_node;
@@ -336,6 +337,7 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	/*
 	 * Find the right place in the rbtree:
 	 */
+	// 在红黑树中查找合适的位置,循环遍历找到合适的插入位置
 	while (*link) {
 		parent = *link;
 		entry = rb_entry(parent, struct sched_entity, run_node);
@@ -343,6 +345,7 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		 * We dont care about collisions. Nodes with
 		 * the same key stay together.
 		 */
+		// 我们不关心冲突，具有相同键值的节点待在一起
 		if (key < entity_key(cfs_rq, entry)) {
 			link = &parent->rb_left;
 		} else {
@@ -355,15 +358,18 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	 * Maintain a cache of leftmost tree entries (it is frequently
 	 * used):
 	 */
+	// 维护一个缓存，其中存放树最左叶子节点
 	if (leftmost)
 		cfs_rq->rb_leftmost = &se->run_node;
 
-	rb_link_node(&se->run_node, parent, link);
-	rb_insert_color(&se->run_node, &cfs_rq->tasks_timeline);
+	rb_link_node(&se->run_node, parent, link);	// 在父节点上掉用rb_link_node，使新插入的进程成为其子节点
+	rb_insert_color(&se->run_node, &cfs_rq->tasks_timeline);	// 更新树的自平衡相关属性
 }
 
+// 从cfs_rq中删除se
 static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
+	// 更新rb_leftmost缓存
 	if (cfs_rq->rb_leftmost == &se->run_node) {
 		struct rb_node *next_node;
 
@@ -371,9 +377,10 @@ static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		cfs_rq->rb_leftmost = next_node;
 	}
 
-	rb_erase(&se->run_node, &cfs_rq->tasks_timeline);
+	rb_erase(&se->run_node, &cfs_rq->tasks_timeline);		// 从红黑树中删除调度实体
 }
 
+// 选择红黑树最左下角的那个进程，即vruntime最小的进程
 static struct sched_entity *__pick_next_entity(struct cfs_rq *cfs_rq)
 {
 	struct rb_node *left = cfs_rq->rb_leftmost;
@@ -499,6 +506,8 @@ static u64 sched_vslice(struct cfs_rq *cfs_rq, struct sched_entity *se)
  * Update the current task's runtime statistics. Skip current tasks that
  * are not in our scheduling class.
  */
+// 更新当前任务的运行时统计数据。跳过不在调度类中的当前任务
+// 根据当前可运行进程总数对运行时间进行加权计算，并将权重值和vruntime相加
 static inline void
 __update_curr(struct cfs_rq *cfs_rq, struct sched_entity *curr,
 	      unsigned long delta_exec)
@@ -529,11 +538,12 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	 * since the last time we changed load (this cannot
 	 * overflow on 32 bits):
 	 */
-	delta_exec = (unsigned long)(now - curr->exec_start);
+	// 获得从最后一次修改负载后当前任务所占用的运行总时间（32位系统上这不会溢出）
+	delta_exec = (unsigned long)(now - curr->exec_start);		// 计算进程当前执行时间并放入delta_exec
 	if (!delta_exec)
 		return;
 
-	__update_curr(cfs_rq, curr, delta_exec);
+	__update_curr(cfs_rq, curr, delta_exec);		// 调用__update_curr，根据当前可运行进程总数对运行时间进行加权计算，并将权重值和vruntime相加
 	curr->exec_start = now;
 
 	if (entity_is_task(curr)) {
@@ -769,6 +779,7 @@ place_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int initial)
 #define ENQUEUE_WAKEUP	1
 #define ENQUEUE_MIGRATE 2
 
+// CFS将进程加入rbtree
 static void
 enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 {
@@ -776,12 +787,14 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	 * Update the normalized vruntime before updating min_vruntime
 	 * through callig update_curr().
 	 */
+	// 通过调用update_curr()，在更新min_vruntime之前先更新规范化的vruntime
 	if (!(flags & ENQUEUE_WAKEUP) || (flags & ENQUEUE_MIGRATE))
 		se->vruntime += cfs_rq->min_vruntime;
 
 	/*
 	 * Update run-time statistics of the 'current'.
 	 */
+	// 更新“当前任务”的运行时统计数据
 	update_curr(cfs_rq);
 	account_entity_enqueue(cfs_rq, se);
 
@@ -793,7 +806,7 @@ enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 	update_stats_enqueue(cfs_rq, se);
 	check_spread(cfs_rq, se);
 	if (se != cfs_rq->curr)
-		__enqueue_entity(cfs_rq, se);
+		__enqueue_entity(cfs_rq, se);		// 调用__enqueue_entity将se（调度实体）插入cfs_rq的红黑树中
 }
 
 static void __clear_buddies(struct cfs_rq *cfs_rq, struct sched_entity *se)
@@ -811,12 +824,14 @@ static void clear_buddies(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		__clear_buddies(cfs_rq_of(se), se);
 }
 
+// 从cfs_rq中删除进程，删除发生在进程堵塞（变为不可运行）或终止（结束运行）时。
 static void
 dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int sleep)
 {
 	/*
 	 * Update run-time statistics of the 'current'.
 	 */
+	// 更新"当前任务"的运行时统计数据
 	update_curr(cfs_rq);
 
 	update_stats_dequeue(cfs_rq, se);
@@ -836,7 +851,7 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int sleep)
 	clear_buddies(cfs_rq, se);
 
 	if (se != cfs_rq->curr)
-		__dequeue_entity(cfs_rq, se);
+		__dequeue_entity(cfs_rq, se);		// 从cfs_rq的红黑树删除se
 	account_entity_dequeue(cfs_rq, se);
 	update_min_vruntime(cfs_rq);
 
@@ -845,6 +860,7 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int sleep)
 	 * update can refer to the ->curr item and we need to reflect this
 	 * movement in our normalized position.
 	 */
+	// 在更新min_vruntime之后对调度实体进行规范化，因为此更新可以指向“->curr”项，我们需要在规范化的位置反映这一变化
 	if (!sleep)
 		se->vruntime -= cfs_rq->min_vruntime;
 }
@@ -924,7 +940,7 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se);
 
 static struct sched_entity *pick_next_entity(struct cfs_rq *cfs_rq)
 {
-	struct sched_entity *se = __pick_next_entity(cfs_rq);
+	struct sched_entity *se = __pick_next_entity(cfs_rq);		// 调用__pick_next_entity获得下一个调度实体
 	struct sched_entity *left = se;
 
 	if (cfs_rq->next && wakeup_preempt_entity(cfs_rq->next, left) < 1)
@@ -1775,6 +1791,7 @@ preempt:
 		set_last_buddy(se);
 }
 
+// pick_next_task_fair函数会返回下一个可运行进程的指针，或者返回NULL。
 static struct task_struct *pick_next_task_fair(struct rq *rq)
 {
 	struct task_struct *p;
@@ -1785,7 +1802,7 @@ static struct task_struct *pick_next_task_fair(struct rq *rq)
 		return NULL;
 
 	do {
-		se = pick_next_entity(cfs_rq);
+		se = pick_next_entity(cfs_rq);	// 调用pick_next_entity获得下一个调度实体
 		set_next_entity(cfs_rq, se);
 		cfs_rq = group_cfs_rq(se);
 	} while (cfs_rq);
@@ -3685,6 +3702,7 @@ static unsigned int get_rr_interval_fair(struct rq *rq, struct task_struct *task
 /*
  * All the scheduling class methods:
  */
+// 调度类实体
 static const struct sched_class fair_sched_class = {
 	.next			= &idle_sched_class,
 	.enqueue_task		= enqueue_task_fair,
@@ -3693,7 +3711,7 @@ static const struct sched_class fair_sched_class = {
 
 	.check_preempt_curr	= check_preempt_wakeup,
 
-	.pick_next_task		= pick_next_task_fair,
+	.pick_next_task		= pick_next_task_fair,		// 选择下一个要上CPU的task
 	.put_prev_task		= put_prev_task_fair,
 
 #ifdef CONFIG_SMP

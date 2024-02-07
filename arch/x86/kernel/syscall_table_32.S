@@ -1,3 +1,4 @@
+/*系统调用号，添加系统调用的话先在此处末尾添加一行，比如.long sys_foo*/
 ENTRY(sys_call_table)
 	.long sys_restart_syscall	/* 0 - old "setup()" system call, used for restarting */
 	.long sys_exit

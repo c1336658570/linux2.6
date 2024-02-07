@@ -19,6 +19,7 @@ void __init_waitqueue_head(wait_queue_head_t *q, struct lock_class_key *key)
 
 EXPORT_SYMBOL(__init_waitqueue_head);
 
+// 向等待队列中添加元素
 void add_wait_queue(wait_queue_head_t *q, wait_queue_t *wait)
 {
 	unsigned long flags;
@@ -64,6 +65,7 @@ EXPORT_SYMBOL(remove_wait_queue);
  * stops them from bleeding out - it would still allow subsequent
  * loads to move into the critical region).
  */
+// 修改进程状态，可以修改为TASK_INTERRUPTIBLE或TASK_UNINTERRUPTIBLE
 void
 prepare_to_wait(wait_queue_head_t *q, wait_queue_t *wait, int state)
 {
@@ -160,9 +162,10 @@ void abort_exclusive_wait(wait_queue_head_t *q, wait_queue_t *wait,
 }
 EXPORT_SYMBOL(abort_exclusive_wait);
 
+// 等待队列的autoremove_wake_function函数，使用DEFINE_WAIT定义等待队列，默认使用这个函数，DEFINE_WAIT在wait.h中
 int autoremove_wake_function(wait_queue_t *wait, unsigned mode, int sync, void *key)
 {
-	int ret = default_wake_function(wait, mode, sync, key);
+	int ret = default_wake_function(wait, mode, sync, key);		// 在sched中定义的唤醒函数
 
 	if (ret)
 		list_del_init(&wait->task_list);

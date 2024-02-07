@@ -4,6 +4,13 @@
  *  Copyright (C) 1991, 1992  Linus Torvalds
  */
 
+/*
+添加sys_foo系统调用，返回每个进程内核栈的大小
+asmlinkage long sys_foo(void) {
+	return THREAD_SIZE;
+}
+*/
+
 #include <linux/module.h>
 #include <linux/mm.h>
 #include <linux/utsname.h>
@@ -372,10 +379,12 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 	int ret = 0;
 
 	/* We only trust the superuser with rebooting the system. */
-	if (!capable(CAP_SYS_BOOT))
+	// 我们只信任启动系统的系统管理员
+	if (!capable(CAP_SYS_BOOT))	// capable是对系统权限进行检查，检查是否是root用户
 		return -EPERM;
 
 	/* For safety, we require "magic" arguments. */
+	// 为了安全起见，我们需要“magic”参数
 	if (magic1 != LINUX_REBOOT_MAGIC1 ||
 	    (magic2 != LINUX_REBOOT_MAGIC2 &&
 	                magic2 != LINUX_REBOOT_MAGIC2A &&
@@ -386,6 +395,7 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 	/* Instead of trying to make the power_off code look like
 	 * halt when pm_power_off is not set do it the easy way.
 	 */
+	// 当未设置pm_power_off时，请不要试图让power_off的代码看起来像是可以停机，而应该采用更简单的方式
 	if ((cmd == LINUX_REBOOT_CMD_POWER_OFF) && !pm_power_off)
 		cmd = LINUX_REBOOT_CMD_HALT;
 

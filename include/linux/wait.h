@@ -64,6 +64,7 @@ struct task_struct;
 	.func		= default_wake_function,			\
 	.task_list	= { NULL, NULL } }
 
+// 创建一个等待队列，休眠的进程可以在等待队列上，可以将cfs中的进程移动到等待队列，也可以将等待队列进程移动到cfs
 #define DECLARE_WAITQUEUE(name, tsk)					\
 	wait_queue_t name = __WAITQUEUE_INITIALIZER(name, tsk)
 
@@ -79,6 +80,7 @@ struct task_struct;
 
 extern void __init_waitqueue_head(wait_queue_head_t *q, struct lock_class_key *);
 
+// 创建一个等待队列
 #define init_waitqueue_head(q)				\
 	do {						\
 		static struct lock_class_key __key;	\
@@ -115,6 +117,7 @@ static inline int waitqueue_active(wait_queue_head_t *q)
 	return !list_empty(&q->task_list);
 }
 
+// 向等待队列中添加元素
 extern void add_wait_queue(wait_queue_head_t *q, wait_queue_t *wait);
 extern void add_wait_queue_exclusive(wait_queue_head_t *q, wait_queue_t *wait);
 extern void remove_wait_queue(wait_queue_head_t *q, wait_queue_t *wait);
@@ -153,6 +156,7 @@ int out_of_line_wait_on_bit(void *, int, int (*)(void *), unsigned);
 int out_of_line_wait_on_bit_lock(void *, int, int (*)(void *), unsigned);
 wait_queue_head_t *bit_waitqueue(void *, int);
 
+// 唤醒
 #define wake_up(x)			__wake_up(x, TASK_NORMAL, 1, NULL)
 #define wake_up_nr(x, nr)		__wake_up(x, TASK_NORMAL, nr, NULL)
 #define wake_up_all(x)			__wake_up(x, TASK_NORMAL, 0, NULL)
@@ -437,6 +441,7 @@ extern long interruptible_sleep_on_timeout(wait_queue_head_t *q,
 /*
  * Waitqueues which are removed from the waitqueue_head at wakeup time
  */
+// 修改进程状态，可以修改为TASK_INTERRUPTIBLE或TASK_UNINTERRUPTIBLE
 void prepare_to_wait(wait_queue_head_t *q, wait_queue_t *wait, int state);
 void prepare_to_wait_exclusive(wait_queue_head_t *q, wait_queue_t *wait, int state);
 void finish_wait(wait_queue_head_t *q, wait_queue_t *wait);
@@ -452,6 +457,7 @@ int wake_bit_function(wait_queue_t *wait, unsigned mode, int sync, void *key);
 		.task_list	= LIST_HEAD_INIT((name).task_list),	\
 	}
 
+// 定义一个等待队列，名字是name，func是autoremove_wake_function
 #define DEFINE_WAIT(name) DEFINE_WAIT_FUNC(name, autoremove_wake_function)
 
 #define DEFINE_WAIT_BIT(name, word, bit)				\

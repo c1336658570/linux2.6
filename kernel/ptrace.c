@@ -272,6 +272,16 @@ static int ignoring_children(struct sighand_struct *sigh)
  * reap it now, in that case we must also wake up sub-threads sleeping in
  * do_wait().
  */
+/*
+该函数持有tasklist_lock锁用于写入。
+解除被跟踪的任务的跟踪,如果它是一个被跟踪的僵尸进程,则对它进行清理。
+如果需要用release_task()释放它,则返回true。
+(我们不能在这里调用release_task(),因为我们已经持有tasklist_lock。)
+如果它是一个僵尸进程,我们的附着性防止了正常的父进程通知或自我回收。现在如果之前会发生,进行通知。
+如果它应该自我回收,则返回true。
+如果它是我们自己的子进程,则不需要进行通知。但是如果我们的正常子进程会自我回收,那么这个子进程之前由于ptrace而被阻止,
+现在我们必须回收它,在这种情况下,我们也必须唤醒在do_wait()中睡眠的子线程。
+*/
 static bool __ptrace_detach(struct task_struct *tracer, struct task_struct *p)
 {
 	__ptrace_unlink(p);
@@ -328,13 +338,16 @@ int ptrace_detach(struct task_struct *child, unsigned int data)
 /*
  * Detach all tasks we were using ptrace on.
  */
+// 解除ptrace监视关系的
 void exit_ptrace(struct task_struct *tracer)
 {
 	struct task_struct *p, *n;
 	LIST_HEAD(ptrace_dead);
 
 	write_lock_irq(&tasklist_lock);
+	// 遍历ptrace子进程链表(ptraced链表，即监视的子进程)
 	list_for_each_entry_safe(p, n, &tracer->ptraced, ptrace_entry) {
+		// 对每个子进程p,调用__ptrace_detach函数解除跟踪关系，并找一个新的父进程。如果返回true则代表子进程是僵尸进程
 		if (__ptrace_detach(tracer, p))
 			list_add(&p->ptrace_entry, &ptrace_dead);
 	}
@@ -342,6 +355,7 @@ void exit_ptrace(struct task_struct *tracer)
 
 	BUG_ON(!list_empty(&tracer->ptraced));
 
+	// 遍历ptrace_dead链表中的僵尸进程，释放资源。
 	list_for_each_entry_safe(p, n, &ptrace_dead, ptrace_entry) {
 		list_del_init(&p->ptrace_entry);
 		release_task(p);

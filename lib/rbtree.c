@@ -215,6 +215,7 @@ static void __rb_erase_color(struct rb_node *node, struct rb_node *parent,
 		rb_set_black(node);
 }
 
+// 从红黑树中删除节点
 void rb_erase(struct rb_node *node, struct rb_root *root)
 {
 	struct rb_node *child, *parent;

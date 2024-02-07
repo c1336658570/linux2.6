@@ -18,7 +18,7 @@
 
 static DEFINE_SPINLOCK(kthread_create_lock);
 static LIST_HEAD(kthread_create_list);
-struct task_struct *kthreadd_task;
+struct task_struct *kthreadd_task;		// 指向kthreadd内核线程
 
 struct kthread_create_info
 {
@@ -112,6 +112,7 @@ static void create_kthread(struct kthread_create_info *create)
  *
  * Returns a task_struct or ERR_PTR(-ENOMEM).
  */
+// 创建内核线程，如果其他内核线程不调用wake_up_process，新创建的线程永远不会运行，namefmt是新内核进程的名字
 struct task_struct *kthread_create(int (*threadfn)(void *data),
 				   void *data,
 				   const char namefmt[],
@@ -127,7 +128,7 @@ struct task_struct *kthread_create(int (*threadfn)(void *data),
 	list_add_tail(&create.list, &kthread_create_list);
 	spin_unlock(&kthread_create_lock);
 
-	wake_up_process(kthreadd_task);
+	wake_up_process(kthreadd_task);		// 唤醒kthreadd内核线程，kthreadd会去创建新的内核线程
 	wait_for_completion(&create.done);
 
 	if (!IS_ERR(create.result)) {
@@ -187,6 +188,7 @@ EXPORT_SYMBOL(kthread_bind);
  * Returns the result of threadfn(), or %-EINTR if wake_up_process()
  * was never called.
  */
+// 内核的其他部分调用，用来停止运行k这个内核线程
 int kthread_stop(struct task_struct *k)
 {
 	struct kthread *kthread;
@@ -211,6 +213,7 @@ int kthread_stop(struct task_struct *k)
 }
 EXPORT_SYMBOL(kthread_stop);
 
+// 内核时通过从kthreadadd内核进程中衍生出所有新的内核线程，此函数时kthreadd内核线程执行的函数
 int kthreadd(void *unused)
 {
 	struct task_struct *tsk = current;

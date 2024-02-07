@@ -1,6 +1,9 @@
 #ifndef _ASM_X86_UNISTD_32_H
 #define _ASM_X86_UNISTD_32_H
 
+// 可以在此文件末尾加入#define __NR_foo 338来添加系统调用号
+// 最后实现foo()，可以放到kernel/sys.c中，也可以放到与其功能联系紧密的的代码中，比如kernel/sched.c
+
 /*
  * This file contains the system call numbers.
  */

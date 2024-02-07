@@ -4,20 +4,21 @@
 /*
  * cloning flags:
  */
+// clone时的各种标志
 #define CSIGNAL		0x000000ff	/* signal mask to be sent at exit */
-#define CLONE_VM	0x00000100	/* set if VM shared between processes */
-#define CLONE_FS	0x00000200	/* set if fs info shared between processes */
-#define CLONE_FILES	0x00000400	/* set if open files shared between processes */
-#define CLONE_SIGHAND	0x00000800	/* set if signal handlers and blocked signals shared */
-#define CLONE_PTRACE	0x00002000	/* set if we want to let tracing continue on the child too */
-#define CLONE_VFORK	0x00004000	/* set if the parent wants the child to wake it up on mm_release */
-#define CLONE_PARENT	0x00008000	/* set if we want to have the same parent as the cloner */
-#define CLONE_THREAD	0x00010000	/* Same thread group? */
-#define CLONE_NEWNS	0x00020000	/* New namespace group? */
+#define CLONE_VM	0x00000100	/* set if VM shared between processes */	// 父子进程共享地址空间
+#define CLONE_FS	0x00000200	/* set if fs info shared between processes */	// 父子共享打开的文件系统信息
+#define CLONE_FILES	0x00000400	/* set if open files shared between processes */	// 父子共享打开的文件
+#define CLONE_SIGHAND	0x00000800	/* set if signal handlers and blocked signals shared */	// 父子共享信号处理函数和被阻断的信号
+#define CLONE_PTRACE	0x00002000	/* set if we want to let tracing continue on the child too */	// 继续调试子进程
+#define CLONE_VFORK	0x00004000	/* set if the parent wants the child to wake it up on mm_release */	//vfork
+#define CLONE_PARENT	0x00008000	/* set if we want to have the same parent as the cloner */	// 指定子进程和父进程有同一个父进程
+#define CLONE_THREAD	0x00010000	/* Same thread group? */	// 父子放入相同的线程组
+#define CLONE_NEWNS	0x00020000	/* New namespace group? */	// 为子进程创建新的命名空间
 #define CLONE_SYSVSEM	0x00040000	/* share system V SEM_UNDO semantics */
-#define CLONE_SETTLS	0x00080000	/* create a new TLS for the child */
-#define CLONE_PARENT_SETTID	0x00100000	/* set the TID in the parent */
-#define CLONE_CHILD_CLEARTID	0x00200000	/* clear the TID in the child */
+#define CLONE_SETTLS	0x00080000	/* create a new TLS for the child */	// 为子进程创建新的TLS
+#define CLONE_PARENT_SETTID	0x00100000	/* set the TID in the parent */	// 设置父进程PID
+#define CLONE_CHILD_CLEARTID	0x00200000	/* clear the TID in the child */	// 清除子进程PID
 #define CLONE_DETACHED		0x00400000	/* Unused, ignored */
 #define CLONE_UNTRACED		0x00800000	/* set if the tracing process can't force CLONE_PTRACE on this clone */
 #define CLONE_CHILD_SETTID	0x01000000	/* set the TID in the child */
@@ -223,6 +224,7 @@ extern char ___assert_task_state[1 - 2*!!(
 
 #define __set_task_state(tsk, state_value)		\
 	do { (tsk)->state = (state_value); } while (0)
+// 设置进程的状态为state_value，一般用于SMP，如果非SMP的话等价于 task->state = state;
 #define set_task_state(tsk, state_value)		\
 	set_mb((tsk)->state, (state_value))
 
@@ -239,6 +241,7 @@ extern char ___assert_task_state[1 - 2*!!(
  */
 #define __set_current_state(state_value)			\
 	do { current->state = (state_value); } while (0)
+// 设置当前进程的状态为state_value，一般用于SMP，如果非SMP的话等价于 current->state = state;
 #define set_current_state(state_value)		\
 	set_mb(current->state, (state_value))
 
@@ -1087,15 +1090,16 @@ struct load_weight {
  *     4 se->sleep_start
  *     6 se->load.weight
  */
+// 调度实体
 struct sched_entity {
 	struct load_weight	load;		/* for load-balancing */
-	struct rb_node		run_node;
+	struct rb_node		run_node;	// 红黑树节点，调度实体通过红黑树组织起来
 	struct list_head	group_node;
 	unsigned int		on_rq;
 
 	u64			exec_start;
 	u64			sum_exec_runtime;
-	u64			vruntime;
+	u64			vruntime;		// 虚拟运行时间
 	u64			prev_sum_exec_runtime;
 
 	u64			last_wakeup;
@@ -1149,8 +1153,9 @@ struct sched_entity {
 #endif
 };
 
+// 实时调度实体
 struct sched_rt_entity {
-	struct list_head run_list;
+	struct list_head run_list;		// 调度实体通过此链挂到运行队列上
 	unsigned long timeout;
 	unsigned int time_slice;
 	int nr_cpus_allowed;
@@ -1167,6 +1172,7 @@ struct sched_rt_entity {
 
 struct rcu_node;
 
+// 在内核栈尾端创建一个thread_info，用来指向task_struct，task_struct通过slab分配器动态分配，就不需要在栈中分配了
 struct task_struct {
 	volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
 	void *stack;
@@ -1184,8 +1190,8 @@ struct task_struct {
 
 	int prio, static_prio, normal_prio;
 	unsigned int rt_priority;
-	const struct sched_class *sched_class;
-	struct sched_entity se;
+	const struct sched_class *sched_class;		// 调度类
+	struct sched_entity se;			// 调度实体
 	struct sched_rt_entity rt;
 
 #ifdef CONFIG_PREEMPT_NOTIFIERS
@@ -1220,7 +1226,8 @@ struct task_struct {
 	struct sched_info sched_info;
 #endif
 
-	struct list_head tasks;
+	struct list_head tasks;		// 整个系统所有的task_struct组成的链表
+	// list_entry(task->tasks.next/task->tasks.prev, struct task_struct, tasks);		// 获取前/后一个进程
 	struct plist_node pushable_tasks;
 
 	struct mm_struct *mm, *active_mm;
@@ -1242,7 +1249,7 @@ struct task_struct {
 	/* Revert to default priority/policy when forking */
 	unsigned sched_reset_on_fork:1;
 
-	pid_t pid;
+	pid_t pid;		// pid，最大32768,受linux/threads.h中定义的最大PID限制，因为要兼容老版本所以这么设置。也可以修改/proc/sys/kernel/pid_max提高上限
 	pid_t tgid;
 
 #ifdef CONFIG_CC_STACKPROTECTOR
@@ -1269,7 +1276,17 @@ struct task_struct {
 	 * This includes both natural children and PTRACE_ATTACH targets.
 	 * p->ptrace_entry is p's link on the p->parent->ptraced list.
 	 */
+	/*
+	 * ptraced是当前任务使用ptrace跟踪的任务列表。它包括正常fork出的子进程和通过PTRACE_ATTACH系统调用附加的目标进程。
+	 * p->ptrace_entry是任务p在其父任务p->parent的ptraced链表上的链接项。
+   */
 	struct list_head ptraced;
+	/*
+	 * ptrace_entry表示该任务被其父任务使用ptrace系统调用跟踪时,在父任务的ptraced链表上的链接节点。
+	 * 每个被跟踪的任务(包括子进程和附加进程)在其父任务的ptraced列表中都有一个对应的ptrace_entry。
+	 * 通过ptrace_entry可以从被跟踪任务快速找到其父任务,也可以实现父任务管理和访问被跟踪任务的能力。
+	 * 当被跟踪任务退出时,会从父任务的ptraced链表中删除对应的ptrace_entry节点。
+	 */
 	struct list_head ptrace_entry;
 
 	/*
@@ -1952,7 +1969,7 @@ static inline int kstack_end(void *addr)
 #endif
 
 extern union thread_union init_thread_union;
-extern struct task_struct init_task;
+extern struct task_struct init_task;		// init进程的task_struct
 
 extern struct   mm_struct init_mm;
 
@@ -2133,9 +2150,11 @@ static inline unsigned long wait_task_inactive(struct task_struct *p,
 }
 #endif
 
+// 获取进程p的后一个进程
 #define next_task(p) \
 	list_entry_rcu((p)->tasks.next, struct task_struct, tasks)
 
+// 遍历系统所有的进程
 #define for_each_process(p) \
 	for (p = &init_task ; (p = next_task(p)) != &init_task ; )
 

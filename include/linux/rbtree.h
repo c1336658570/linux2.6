@@ -31,12 +31,15 @@
   rbtree, if necessary.
 
 -----------------------------------------------------------------------
+// 在高速缓存中搜索一个文件区（由一个i节点和一个偏移量共同描述）。每个i节点都有自己的rbtree，以关联在文件中的页偏移
+// 该函数搜索给定i节点的rbtree，以寻找匹配的偏移值
 static inline struct page * rb_search_page_cache(struct inode * inode,
 						 unsigned long offset)
 {
 	struct rb_node * n = inode->i_rb_page_cache.rb_node;
 	struct page * page;
 
+	// 遍历整个rbtree。offset决定向左还是向右遍历。
 	while (n)
 	{
 		page = rb_entry(n, struct page, rb_page_cache);
@@ -51,6 +54,7 @@ static inline struct page * rb_search_page_cache(struct inode * inode,
 	return NULL;
 }
 
+// 插入操作，如果页被加入到页高速缓存中，则返回NULL。如果页已经在高速缓存，返回已存在的页结构地址。
 static inline struct page * __rb_insert_page_cache(struct inode * inode,
 						   unsigned long offset,
 						   struct rb_node * node)
@@ -59,6 +63,7 @@ static inline struct page * __rb_insert_page_cache(struct inode * inode,
 	struct rb_node * parent = NULL;
 	struct page * page;
 
+	// 遍历整颗树
 	while (*p)
 	{
 		parent = *p;
@@ -77,6 +82,7 @@ static inline struct page * __rb_insert_page_cache(struct inode * inode,
 	return NULL;
 }
 
+// 插入操作
 static inline struct page * rb_insert_page_cache(struct inode * inode,
 						 unsigned long offset,
 						 struct rb_node * node)
@@ -97,6 +103,7 @@ static inline struct page * rb_insert_page_cache(struct inode * inode,
 #include <linux/kernel.h>
 #include <linux/stddef.h>
 
+// 红黑树节点
 struct rb_node
 {
 	unsigned long  rb_parent_color;
@@ -107,6 +114,7 @@ struct rb_node
 } __attribute__((aligned(sizeof(long))));
     /* The alignment might seem pointless, but allegedly CRIS needs it */
 
+// 红黑树根节点
 struct rb_root
 {
 	struct rb_node *rb_node;
@@ -129,6 +137,7 @@ static inline void rb_set_color(struct rb_node *rb, int color)
 	rb->rb_parent_color = (rb->rb_parent_color & ~1) | color;
 }
 
+// 定义一个临时的节点，节点内的指针指向空
 #define RB_ROOT	(struct rb_root) { NULL, }
 #define	rb_entry(ptr, type, member) container_of(ptr, type, member)
 

@@ -1,9 +1,11 @@
+// 大内核锁BLK
 #ifndef __LINUX_SMPLOCK_H
 #define __LINUX_SMPLOCK_H
 
 #ifdef CONFIG_LOCK_KERNEL
 #include <linux/sched.h>
 
+// 如果锁被持有返回非0值，否则返回0（UP总是返回非0）
 #define kernel_locked()		(current->lock_depth >= 0)
 
 extern int __lockfunc __reacquire_kernel_lock(void);
@@ -32,10 +34,12 @@ extern void __lockfunc
 _unlock_kernel(const char *func, const char *file, int line)
 __releases(kernel_lock);
 
+// 加锁
 #define lock_kernel() do {					\
 	_lock_kernel(__func__, __FILE__, __LINE__);		\
 } while (0)
 
+// 解锁
 #define unlock_kernel()	do {					\
 	_unlock_kernel(__func__, __FILE__, __LINE__);		\
 } while (0)
@@ -54,11 +58,13 @@ static inline void cycle_kernel_lock(void)
 
 #else
 
+// 单处理器，BLK并不执行实际的加锁解锁操作
 #define lock_kernel()
 #define unlock_kernel()
 #define release_kernel_lock(task)		do { } while(0)
 #define cycle_kernel_lock()			do { } while(0)
 #define reacquire_kernel_lock(task)		0
+// 如果锁被持有返回非0值，否则返回0（UP总是返回非0）
 #define kernel_locked()				1
 
 #endif /* CONFIG_LOCK_KERNEL */

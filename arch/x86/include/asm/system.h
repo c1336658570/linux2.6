@@ -363,8 +363,11 @@ void stop_this_cpu(void *dummy);
 #define rmb() alternative("lock; addl $0,0(%%esp)", "lfence", X86_FEATURE_XMM2)
 #define wmb() alternative("lock; addl $0,0(%%esp)", "sfence", X86_FEATURE_XMM)
 #else
+// 即提供读内存屏障也提供写内存屏障。载入和存储动作都不会跨越屏障重新排序。
 #define mb() 	asm volatile("mfence":::"memory")
+// 提供“读”内存屏障，确保跨越rmb()的再如动作不会发生重排序。也就是说，在rmb()之前的载入操作不会被重排序在调用之后。同理，在rmb()之后的载入操作不会被重排序在调用之前。
 #define rmb()	asm volatile("lfence":::"memory")
+// 提供“写”内存屏障，功能和rmb()类似，区别仅仅是它针对存储而非载入
 #define wmb()	asm volatile("sfence" ::: "memory")
 #endif
 
@@ -420,6 +423,8 @@ void stop_this_cpu(void *dummy);
  * in cases like this where there are no data dependencies.
  **/
 
+// rmb()的变种，提供一个读屏障，但是仅仅是针对后序读操作所依靠的哪些载入。因为屏障后的操作依赖屏障前的操作，因此，
+// 该屏障确保屏障前的读操作在屏障后的读操作之前完成。
 #define read_barrier_depends()	do { } while (0)
 
 #ifdef CONFIG_SMP
@@ -437,7 +442,10 @@ void stop_this_cpu(void *dummy);
 #define smp_read_barrier_depends()	read_barrier_depends()
 #define set_mb(var, value) do { (void)xchg(&var, value); } while (0)
 #else
+// smp_*这些操作对mb等操作进行了优化，在smp内核中它们被定义为内存屏障，在单处理器内核中，它们被定义成编译器屏障。
+// 在SMP上提供mb()，在UP上提供barrier()
 #define smp_mb()	barrier()
+// 在SMP上提供rmb()，在UP上提供barrier()，下面的两个也是
 #define smp_rmb()	barrier()
 #define smp_wmb()	barrier()
 #define smp_read_barrier_depends()	do { } while (0)

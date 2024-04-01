@@ -44,6 +44,7 @@ static void _kfifo_init(struct kfifo *fifo, void *buffer,
  * @size: the size of the internal buffer, this has to be a power of 2.
  *
  */
+// 自己分配缓冲区，调用kfifo_init初始化kfifo
 void kfifo_init(struct kfifo *fifo, void *buffer, unsigned int size)
 {
 	/* size must be a power of 2 */
@@ -65,6 +66,7 @@ EXPORT_SYMBOL(kfifo_init);
  * The buffer will be release with kfifo_free().
  * Return 0 if no error, otherwise the an error code
  */
+// kfifo_alloc函数分配缓冲区，初始化kfifo，成功返回0,失败返回一个负数错误玛，kfifo的内存空间由kfifo_alloc分配，size是2的幂
 int kfifo_alloc(struct kfifo *fifo, unsigned int size, gfp_t gfp_mask)
 {
 	unsigned char *buffer;
@@ -94,6 +96,7 @@ EXPORT_SYMBOL(kfifo_alloc);
  * kfifo_free - frees the FIFO internal buffer
  * @fifo: the fifo to be freed.
  */
+// 撤销通过kfifo_alloc分配的队列
 void kfifo_free(struct kfifo *fifo)
 {
 	kfree(fifo->buffer);
@@ -250,6 +253,7 @@ EXPORT_SYMBOL(__kfifo_in_n);
  * Note that with only one concurrent reader and one concurrent
  * writer, you don't need extra locking to use these functions.
  */
+// 向kfifo推入数据，把from指针所指的len字节数据拷贝到fifo所指的队列中。成功返回推入字节数。如果队列空闲字节小于len，返回值可能小于len。甚至返回0,代表没有任何数据被推入
 unsigned int kfifo_in(struct kfifo *fifo, const void *from,
 				unsigned int len)
 {
@@ -314,6 +318,7 @@ EXPORT_SYMBOL(kfifo_out);
  * into the @to buffer and returns the number of copied bytes.
  * The data is not removed from the FIFO.
  */
+// 从队列查看数据而不读取，返回值为实际查看的数据长度，单位为字节
 unsigned int kfifo_out_peek(struct kfifo *fifo, void *to, unsigned int len,
 			    unsigned offset)
 {

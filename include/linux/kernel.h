@@ -706,6 +706,14 @@ static inline void ftrace_dump(void) { }
  * @member:	the name of the member within the struct.
  *
  */
+/**
+container_of - 将结构体成员强转为包含该成员的结构体实例
+@ptr: 指向成员的指针
+@type: 该成员所在的容器结构体类型
+@member: 结构体内该成员的名称
+这个宏实现了从结构体成员指针获取到整个结构体实例的指针。通过利用成员在结构体内的偏移量计算,能够得到容器结构体的起始地址。
+*/
+// 通过链表节点恢复链表原有的数据结构
 #define container_of(ptr, type, member) ({			\
 	const typeof( ((type *)0)->member ) *__mptr = (ptr);	\
 	(type *)( (char *)__mptr - offsetof(type,member) );})

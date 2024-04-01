@@ -581,7 +581,7 @@ asmlinkage void __init start_kernel(void)
 	pidhash_init();
 	vfs_caches_init_early();
 	sort_main_extable();
-	trap_init();
+	trap_init();		// 初始化异常处理
 	mm_init();
 	/*
 	 * Set up the scheduler prior starting any interrupts (such as the
@@ -603,11 +603,11 @@ asmlinkage void __init start_kernel(void)
 	radix_tree_init();
 	/* init some links before init_ISA_irqs() */
 	early_irq_init();
-	init_IRQ();
+	init_IRQ();		// 初始化外部中断
 	prio_tree_init();
-	init_timers();
+	init_timers();		// 初始化定时器模块，同时，会注册定时器的软中断处理函数
 	hrtimers_init();
-	softirq_init();
+	softirq_init();		// 初始化软中断
 	timekeeping_init();
 	time_init();
 	profile_init();

@@ -21,18 +21,21 @@
 #define inc_preempt_count() add_preempt_count(1)
 #define dec_preempt_count() sub_preempt_count(1)
 
+// 返回抢占计数
 #define preempt_count()	(current_thread_info()->preempt_count)
 
 #ifdef CONFIG_PREEMPT
 
 asmlinkage void preempt_schedule(void);
 
+// 增加抢占计数值，从而禁止内核抢占
 #define preempt_disable() \
 do { \
 	inc_preempt_count(); \
 	barrier(); \
 } while (0)
 
+// 激活内核抢占但不再检查任何被挂起的需调度的任务
 #define preempt_enable_no_resched() \
 do { \
 	barrier(); \
@@ -45,6 +48,7 @@ do { \
 		preempt_schedule(); \
 } while (0)
 
+// 减少抢占计数，并当该值降为0时检查和执行被挂起的需调度的任务
 #define preempt_enable() \
 do { \
 	preempt_enable_no_resched(); \

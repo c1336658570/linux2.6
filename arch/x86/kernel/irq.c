@@ -223,30 +223,36 @@ u64 arch_irq_stat(void)
  * SMP cross-CPU interrupts have their own specific
  * handlers).
  */
+// x86的do_IRQ，执行中断的函数，处理器接收中断，然后就执行这个函数
 unsigned int __irq_entry do_IRQ(struct pt_regs *regs)
 {
+	// 保存当前的寄存器状态，以便中断处理完成后能恢复。
 	struct pt_regs *old_regs = set_irq_regs(regs);
 
 	/* high bit used in ret_from_ code  */
+	/* 在返回从中断返回的代码中使用的高位 */
 	unsigned vector = ~regs->orig_ax;
 	unsigned irq;
 
-	exit_idle();
-	irq_enter();
+	exit_idle();	// 如果CPU处于空闲状态，执行退出空闲状态的操作。
+	irq_enter();	// 标记中断处理的开始，执行一些统计和跟踪中断的操作。
 
-	irq = __get_cpu_var(vector_irq)[vector];
+	irq = __get_cpu_var(vector_irq)[vector];		// 获取irq号
 
-	if (!handle_irq(irq, regs)) {
-		ack_APIC_irq();
+	if (!handle_irq(irq, regs)) {		// 通过handle_irq调用irq号对应的中断
+	// 如果没有找到处理这个IRQ的中断处理函数，则执行以下代码。
+		ack_APIC_irq();	// 确认APIC（高级可编程中断控制器）中断，告知已经处理完毕。
 
+		// 使用速率限制打印错误消息，避免在短时间内打印过多信息。
 		if (printk_ratelimit())
 			pr_emerg("%s: %d.%d No irq handler for vector (irq %d)\n",
 				__func__, smp_processor_id(), vector, irq);
+			// 打印出没有为这个中断向量找到处理函数的紧急错误消息。
 	}
 
-	irq_exit();
+	irq_exit();	// 标记中断处理的结束，执行一些清理操作。
 
-	set_irq_regs(old_regs);
+	set_irq_regs(old_regs);		// 恢复之前保存的寄存器状态。
 	return 1;
 }
 

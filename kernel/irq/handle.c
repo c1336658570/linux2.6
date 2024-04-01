@@ -162,6 +162,7 @@ static struct irq_desc irq_desc_legacy[NR_IRQS_LEGACY] __cacheline_aligned_in_sm
 
 static unsigned int *kstat_irqs_legacy;
 
+// 静态定义的中断描述符初始化
 int __init early_irq_init(void)
 {
 	struct irq_desc *desc;
@@ -239,6 +240,7 @@ out_unlock:
 
 #else /* !CONFIG_SPARSE_IRQ */
 
+// 定义中断描述符表
 struct irq_desc irq_desc[NR_IRQS] __cacheline_aligned_in_smp = {
 	[0 ... NR_IRQS-1] = {
 		.status = IRQ_DISABLED,
@@ -365,17 +367,25 @@ static void warn_no_thread(unsigned int irq, struct irqaction *action)
  *
  * Handles the action chain of an irq event
  */
+/**
+handle_IRQ_event - 中断动作链处理程序
+@irq: 中断号
+@action: 该中断的中断动作链
+处理中断事件的动作链
+*/
 irqreturn_t handle_IRQ_event(unsigned int irq, struct irqaction *action)
 {
 	irqreturn_t ret, retval = IRQ_NONE;
 	unsigned int status = 0;
 
+	// 因为处理器禁止中断，这里要把它打开，就必须在处理程序注册期间指定未IRQF_DISABLE标志。
 	if (!(action->flags & IRQF_DISABLED))
 		local_irq_enable_in_hardirq();
 
+	// 每个潜在的处理程序在循环中依次执行，如果这条中断线不共享，第一次执行就退出循环。否则，所有处理程序都要被执行
 	do {
 		trace_irq_handler_entry(irq, action);
-		ret = action->handler(irq, action->dev_id);
+		ret = action->handler(irq, action->dev_id);		// 执行中断处理函数
 		trace_irq_handler_exit(irq, action, ret);
 
 		switch (ret) {
@@ -384,12 +394,14 @@ irqreturn_t handle_IRQ_event(unsigned int irq, struct irqaction *action)
 			 * Set result to handled so the spurious check
 			 * does not trigger.
 			 */
+			// 把返回值设置为已处理，以便可疑的检查不再触发
 			ret = IRQ_HANDLED;
 
 			/*
 			 * Catch drivers which return WAKE_THREAD but
 			 * did not set up a thread function
 			 */
+			// 捕获返回值为WAKE_THREAD的驱动程序，但是并不创建一个线程函数
 			if (unlikely(!action->thread_fn)) {
 				warn_no_thread(irq, action);
 				break;
@@ -403,6 +415,8 @@ irqreturn_t handle_IRQ_event(unsigned int irq, struct irqaction *action)
 			 * disabled the device interrupt, so no irq
 			 * storm is lurking.
 			 */
+			// 为这次中断唤醒处理线程。万一线程崩溃且被杀死，我们仅仅假装已经处理了该中断。上述的硬件中断（hardirq）
+			// 处理程序已经禁止设备中断，因此杜绝irq产生
 			if (likely(!test_bit(IRQTF_DIED,
 					     &action->thread_flags))) {
 				set_bit(IRQTF_RUNTHREAD, &action->thread_flags);
@@ -422,11 +436,13 @@ irqreturn_t handle_IRQ_event(unsigned int irq, struct irqaction *action)
 		action = action->next;
 	} while (action);
 
+	// 如果注册期间指定了IRQF_SAMPLE_RANDOM标志，则还需要调用add_interrupt_randomness()。这个函数用中断间隔时间为随机数产生器产生熵
 	if (status & IRQF_SAMPLE_RANDOM)
 		add_interrupt_randomness(irq);
-	local_irq_disable();
+	// 此函数用来禁止当前处理器上的本地中断
+	local_irq_disable();		// 再将中断禁止（do_IRQ()期望中断一直是禁止的）
 
-	return retval;
+	return retval;		// 函数返回，回到do_IRQ()（arch/x86/kernel/irq.c/do_IRQ）
 }
 
 #ifndef CONFIG_GENERIC_HARDIRQS_NO__DO_IRQ

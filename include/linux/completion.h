@@ -1,3 +1,5 @@
+// 完成变量相关的代码。如果一个任务需要执行一些工作，另一个任务就会在完成变量上等待。当这个任务完成后，会使用完成变量唤醒在等待的任务
+// 使用完成变量可以参考kernel/sched.c和kernel/fork.c
 #ifndef __LINUX_COMPLETION_H
 #define __LINUX_COMPLETION_H
 
@@ -22,9 +24,10 @@
  * and macros DECLARE_COMPLETION(), DECLARE_COMPLETION_ONSTACK(), and
  * INIT_COMPLETION().
  */
+// 完成变量定义
 struct completion {
 	unsigned int done;
-	wait_queue_head_t wait;
+	wait_queue_head_t wait;		// 等待队列
 };
 
 #define COMPLETION_INITIALIZER(work) \
@@ -41,6 +44,7 @@ struct completion {
  * for static declarations. You should use the _ONSTACK variant for automatic
  * variables.
  */
+// 静态创建并初始化完成变量
 #define DECLARE_COMPLETION(work) \
 	struct completion work = COMPLETION_INITIALIZER(work)
 
@@ -70,12 +74,14 @@ struct completion {
  * This inline function will initialize a dynamically created completion
  * structure.
  */
+// 动态创建并初始化完成变量
 static inline void init_completion(struct completion *x)
 {
 	x->done = 0;
 	init_waitqueue_head(&x->wait);
 }
 
+// 需要等待的任务调用该函数等待特定事件
 extern void wait_for_completion(struct completion *);
 extern int wait_for_completion_interruptible(struct completion *x);
 extern int wait_for_completion_killable(struct completion *x);
@@ -86,6 +92,7 @@ extern unsigned long wait_for_completion_interruptible_timeout(
 extern bool try_wait_for_completion(struct completion *x);
 extern bool completion_done(struct completion *x);
 
+// 发信号唤醒任何等待任务
 extern void complete(struct completion *);
 extern void complete_all(struct completion *);
 

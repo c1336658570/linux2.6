@@ -199,14 +199,23 @@ bool handle_irq(unsigned irq, struct pt_regs *regs)
 
 	overflow = check_stack_overflow();
 
-	desc = irq_to_desc(irq);
+	desc = irq_to_desc(irq);	// 找irq对应的描述符
 	if (unlikely(!desc))
 		return false;
 
 	if (!execute_on_irq_stack(overflow, desc, irq)) {
 		if (unlikely(overflow))
 			print_stack_overflow();
-		desc->handle_irq(irq, desc);
+			/*
+			handle_irq就是highlevel irq-events handler，何谓high level？站在高处自然看不到细节。我认为high level是和specific相对，specific handler处理具体的事务，例如处理一个按键中断、处理一个磁盘中断。而high level则是对处理各种中断交互过程的一个抽象，根据下列硬件的不同：
+			（a）中断控制器
+			（b）IRQ trigger type highlevel irq-events handler可以分成：
+			（a）处理电平触发类型的中断handler（handle_level_irq）
+			（b）处理边缘触发类型的中断handler（handle_edge_irq）
+			（c）处理简单类型的中断handler（handle_simple_irq）
+			（d）处理EOI类型的中断handler（handle_fasteoi_irq）
+			*/
+		desc->handle_irq(irq, desc);		// 执行相应的中断函数
 	}
 
 	return true;

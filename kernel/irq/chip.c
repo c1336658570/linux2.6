@@ -494,7 +494,7 @@ handle_level_irq(unsigned int irq, struct irq_desc *desc)
 	desc->status |= IRQ_INPROGRESS;
 	raw_spin_unlock(&desc->lock);
 
-	action_ret = handle_IRQ_event(irq, action);
+	action_ret = handle_IRQ_event(irq, action);		// 调用handle_IRQ_event执行中断处理函数
 	if (!noirqdebug)
 		note_interrupt(irq, desc, action_ret);
 
@@ -547,7 +547,7 @@ handle_fasteoi_irq(unsigned int irq, struct irq_desc *desc)
 	desc->status &= ~IRQ_PENDING;
 	raw_spin_unlock(&desc->lock);
 
-	action_ret = handle_IRQ_event(irq, action);
+	action_ret = handle_IRQ_event(irq, action);		// 执行handle_irq_event
 	if (!noirqdebug)
 		note_interrupt(irq, desc, action_ret);
 

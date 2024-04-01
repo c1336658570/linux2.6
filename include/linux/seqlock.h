@@ -1,3 +1,4 @@
+// 顺序锁的相关代码，通常称为seq锁。
 #ifndef __LINUX_SEQLOCK_H
 #define __LINUX_SEQLOCK_H
 /*
@@ -29,6 +30,9 @@
 #include <linux/spinlock.h>
 #include <linux/preempt.h>
 
+// 顺序锁。依靠序列计数器实现。当有疑义的数据备写入时，会得到一个锁，并且序列值会增加。
+// 在读取数据之前和之后，序列号被读取。如果读取的序列号值相同，说明在读操作进行的过程没有被写操作打断过。
+// 此外，如果读取的值是偶数，那么表明写操作没有发生（因为锁初始值是0,所以写锁会使值变为奇数，释放时候变成偶数。）
 typedef struct {
 	unsigned sequence;
 	spinlock_t lock;
@@ -50,6 +54,7 @@ typedef struct {
 		spin_lock_init(&(x)->lock);		\
 	} while (0)
 
+// 定义一个seq锁
 #define DEFINE_SEQLOCK(x) \
 		seqlock_t x = __SEQLOCK_UNLOCKED(x)
 
@@ -57,6 +62,7 @@ typedef struct {
  * Acts like a normal spin_lock/unlock.
  * Don't need preempt_disable() because that is in the spin_lock already.
  */
+// 获取写锁
 static inline void write_seqlock(seqlock_t *sl)
 {
 	spin_lock(&sl->lock);
@@ -64,6 +70,7 @@ static inline void write_seqlock(seqlock_t *sl)
 	smp_wmb();
 }
 
+// 释放写锁
 static inline void write_sequnlock(seqlock_t *sl)
 {
 	smp_wmb();
@@ -83,6 +90,7 @@ static inline int write_tryseqlock(seqlock_t *sl)
 }
 
 /* Start of read calculation -- fetch last complete writer token */
+// 读之前获取序列值
 static __always_inline unsigned read_seqbegin(const seqlock_t *sl)
 {
 	unsigned ret;
@@ -103,6 +111,7 @@ repeat:
  *
  * If sequence value changed then writer changed data while in section.
  */
+// 读之后判断读之前的序列值和现在的序列值是否相同
 static __always_inline int read_seqretry(const seqlock_t *sl, unsigned start)
 {
 	smp_rmb();

@@ -1,3 +1,4 @@
+// 64位原子整数实现
 #ifndef _ASM_X86_ATOMIC64_64_H
 #define _ASM_X86_ATOMIC64_64_H
 

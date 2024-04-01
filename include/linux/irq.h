@@ -40,37 +40,48 @@ typedef	void (*irq_flow_handler_t)(unsigned int irq,
  *
  * IRQ types
  */
-#define IRQ_TYPE_NONE		0x00000000	/* Default, unspecified type */
-#define IRQ_TYPE_EDGE_RISING	0x00000001	/* Edge rising type */
-#define IRQ_TYPE_EDGE_FALLING	0x00000002	/* Edge falling type */
-#define IRQ_TYPE_EDGE_BOTH (IRQ_TYPE_EDGE_FALLING | IRQ_TYPE_EDGE_RISING)
-#define IRQ_TYPE_LEVEL_HIGH	0x00000004	/* Level high type */
-#define IRQ_TYPE_LEVEL_LOW	0x00000008	/* Level low type */
-#define IRQ_TYPE_SENSE_MASK	0x0000000f	/* Mask of the above */
-#define IRQ_TYPE_PROBE		0x00000010	/* Probing in progress */
+/*
+ * IRQ line status.
+ * 中断请求（IRQ）线状态。
+ *
+ * Bits 0-7 are reserved for the IRQF_* bits in linux/interrupt.h
+ * 位0-7用于在linux/interrupt.h中的IRQF_*位保留。
+ *
+ * IRQ types
+ * IRQ类型
+ */
+#define IRQ_TYPE_NONE			0x00000000	/* Default, unspecified type */
+#define IRQ_TYPE_EDGE_RISING		0x00000001	/* 上升沿触发类型 */
+#define IRQ_TYPE_EDGE_FALLING		0x00000002	/* 下降沿触发类型 */
+#define IRQ_TYPE_EDGE_BOTH		(IRQ_TYPE_EDGE_FALLING | IRQ_TYPE_EDGE_RISING) /* 上下降沿触发类型 */
+#define IRQ_TYPE_LEVEL_HIGH		0x00000004	/* 高电平触发类型 */
+#define IRQ_TYPE_LEVEL_LOW		0x00000008	/* 低电平触发类型 */
+#define IRQ_TYPE_SENSE_MASK		0x0000000f	/* 以上类型的掩码 */
+#define IRQ_TYPE_PROBE			0x00000010	/* 探测正在进行中 */
 
 /* Internal flags */
-#define IRQ_INPROGRESS		0x00000100	/* IRQ handler active - do not enter! */
-#define IRQ_DISABLED		0x00000200	/* IRQ disabled - do not enter! */
-#define IRQ_PENDING		0x00000400	/* IRQ pending - replay on enable */
-#define IRQ_REPLAY		0x00000800	/* IRQ has been replayed but not acked yet */
-#define IRQ_AUTODETECT		0x00001000	/* IRQ is being autodetected */
-#define IRQ_WAITING		0x00002000	/* IRQ not yet seen - for autodetection */
-#define IRQ_LEVEL		0x00004000	/* IRQ level triggered */
-#define IRQ_MASKED		0x00008000	/* IRQ masked - shouldn't be seen again */
-#define IRQ_PER_CPU		0x00010000	/* IRQ is per CPU */
-#define IRQ_NOPROBE		0x00020000	/* IRQ is not valid for probing */
-#define IRQ_NOREQUEST		0x00040000	/* IRQ cannot be requested */
-#define IRQ_NOAUTOEN		0x00080000	/* IRQ will not be enabled on request irq */
-#define IRQ_WAKEUP		0x00100000	/* IRQ triggers system wakeup */
-#define IRQ_MOVE_PENDING	0x00200000	/* need to re-target IRQ destination */
-#define IRQ_NO_BALANCING	0x00400000	/* IRQ is excluded from balancing */
-#define IRQ_SPURIOUS_DISABLED	0x00800000	/* IRQ was disabled by the spurious trap */
-#define IRQ_MOVE_PCNTXT		0x01000000	/* IRQ migration from process context */
-#define IRQ_AFFINITY_SET	0x02000000	/* IRQ affinity was set from userspace*/
-#define IRQ_SUSPENDED		0x04000000	/* IRQ has gone through suspend sequence */
-#define IRQ_ONESHOT		0x08000000	/* IRQ is not unmasked after hardirq */
-#define IRQ_NESTED_THREAD	0x10000000	/* IRQ is nested into another, no own handler thread */
+/* 内部标志 */
+#define IRQ_INPROGRESS			0x00000100	/* IRQ处理程序正在运行 - 不要进入！ */
+#define IRQ_DISABLED			0x00000200	/* IRQ被禁用 - 不要进入！ */
+#define IRQ_PENDING			0x00000400	/* IRQ挂起 - 在启用时重新触发 */
+#define IRQ_REPLAY			0x00000800	/* IRQ已经重新触发但尚未确认 */
+#define IRQ_AUTODETECT			0x00001000	/* 正在自动检测IRQ */
+#define IRQ_WAITING			0x00002000	/* IRQ尚未触发 - 用于自动检测 */
+#define IRQ_LEVEL			0x00004000	/* IRQ电平触发 */
+#define IRQ_MASKED			0x00008000	/* IRQ被屏蔽 - 不应再次触发 */
+#define IRQ_PER_CPU			0x00010000	/* 每个CPU的IRQ */
+#define IRQ_NOPROBE			0x00020000	/* IRQ对于探测无效 */
+#define IRQ_NOREQUEST			0x00040000	/* IRQ无法请求 */
+#define IRQ_NOAUTOEN			0x00080000	/* 请求IRQ时不会启用IRQ */
+#define IRQ_WAKEUP			0x00100000	/* IRQ触发系统唤醒 */
+#define IRQ_MOVE_PENDING		0x00200000	/* 需要重新定位IRQ目标 */
+#define IRQ_NO_BALANCING		0x00400000	/* IRQ不参与负载均衡 */
+#define IRQ_SPURIOUS_DISABLED		0x00800000	/* IRQ被虚假陷阱禁用 */
+#define IRQ_MOVE_PCNTXT			0x01000000	/* 从进程上下文迁移的IRQ */
+#define IRQ_AFFINITY_SET		0x02000000	/* IRQ亲和性已从用户空间设置 */
+#define IRQ_SUSPENDED			0x04000000	/* IRQ已经经历挂起序列 */
+#define IRQ_ONESHOT			0x08000000	/* IRQ在硬中断后不会取消屏蔽 */
+#define IRQ_NESTED_THREAD		0x10000000	/* IRQ嵌套到另一个中断中，没有自己的处理程序线程 */
 
 #ifdef CONFIG_IRQ_PER_CPU
 # define CHECK_IRQ_PER_CPU(var) ((var) & IRQ_PER_CPU)
@@ -108,6 +119,32 @@ struct msi_desc;
  * @release:		release function solely used by UML
  * @typename:		obsoleted by name, kept as migration helper
  */
+/**
+ * struct irq_chip - 硬件中断芯片描述符
+ *
+ * @name:		用于/proc/interrupts的名称
+ * @startup:		启动中断（如果为NULL，则默认为->enable）
+ * @shutdown:		关闭中断（如果为NULL，则默认为->disable）
+ * @enable:		使能中断（如果为NULL，则默认为chip->unmask）
+ * @disable:		禁用中断
+ * @ack:		开始一个新的中断
+ * @mask:		屏蔽中断源
+ * @mask_ack:		屏蔽并确认中断源
+ * @unmask:		解除屏蔽中断源
+ * @eoi:		中断结束 - 芯片级别
+ * @end:		中断结束 - 流控制级别
+ * @set_affinity:	设置SMP机器上的CPU亲和性
+ * @retrigger:		重新发送一个IRQ给CPU
+ * @set_type:		设置IRQ的流类型（IRQ_TYPE_LEVEL等）
+ * @set_wake:		启用/禁用IRQ的电源管理唤醒
+ *
+ * @bus_lock:		用于锁定对慢速总线（如i2c）芯片的访问的函数
+ * @bus_sync_unlock:	用于同步和解锁慢速总线（如i2c）芯片的函数
+ *
+ * @release:		仅由UML使用的释放函数
+ * @typename:		已被name取代，作为迁移助手保留
+ */
+// 定义了一组函数指针，用于处理硬件中断的不同操作，包括启动、关闭、使能、禁用中断，中断确认，屏蔽和解除屏蔽中断源，中断结束等。这些函数指针提供了与硬件平台相关的操作，以便在内核中正确处理硬件中断。
 struct irq_chip {
 	const char	*name;
 	unsigned int	(*startup)(unsigned int irq);
@@ -142,36 +179,37 @@ struct irq_chip {
 	const char	*typename;
 };
 
-struct timer_rand_state;
-struct irq_2_iommu;
+struct timer_rand_state;	// 计时器随机状态结构体
+struct irq_2_iommu;		// 中断到 IOMMU 的结构体
+
 /**
- * struct irq_desc - interrupt descriptor
- * @irq:		interrupt number for this descriptor
- * @timer_rand_state:	pointer to timer rand state struct
- * @kstat_irqs:		irq stats per cpu
- * @irq_2_iommu:	iommu with this irq
- * @handle_irq:		highlevel irq-events handler [if NULL, __do_IRQ()]
- * @chip:		low level interrupt hardware access
- * @msi_desc:		MSI descriptor
- * @handler_data:	per-IRQ data for the irq_chip methods
- * @chip_data:		platform-specific per-chip private data for the chip
- *			methods, to allow shared chip implementations
- * @action:		the irq action chain
- * @status:		status information
- * @depth:		disable-depth, for nested irq_disable() calls
- * @wake_depth:		enable depth, for multiple set_irq_wake() callers
- * @irq_count:		stats field to detect stalled irqs
- * @last_unhandled:	aging timer for unhandled count
- * @irqs_unhandled:	stats field for spurious unhandled interrupts
- * @lock:		locking for SMP
- * @affinity:		IRQ affinity on SMP
- * @node:		node index useful for balancing
- * @pending_mask:	pending rebalanced interrupts
- * @threads_active:	number of irqaction threads currently running
- * @wait_for_threads:	wait queue for sync_irq to wait for threaded handlers
- * @dir:		/proc/irq/ procfs entry
- * @name:		flow handler name for /proc/interrupts output
+ * struct irq_desc - 中断描述符
+ * @irq: 中断号
+ * @timer_rand_state: 指向计时器随机状态结构体的指针
+ * @kstat_irqs: 每个 CPU 的中断统计信息
+ * @irq_2_iommu: 拥有该中断的 IOMMU
+ * @handle_irq: 高级别中断事件处理程序（如果为 NULL，则为 __do_IRQ()）
+ * @chip: 低级别中断硬件访问
+ * @msi_desc: MSI 描述符
+ * @handler_data: irq_chip 方法的每个中断数据
+ * @chip_data: 与芯片相关的特定于平台的每个芯片私有数据，以允许共享芯片实现
+ * @action: 中断动作链
+ * @status: 状态信息，可以通过设置该变量来关闭该中断
+ * @depth: 禁用深度，用于嵌套的 irq_disable() 调用
+ * @wake_depth: 启用深度，用于多个 set_irq_wake() 调用者
+ * @irq_count: 用于检测挂起的中断的统计字段
+ * @last_unhandled: 未处理计数的老化定时器
+ * @irqs_unhandled: 用于虚假未处理中断的统计字段
+ * @lock: SMP 的锁定
+ * @affinity: SMP 上的 IRQ 亲和性
+ * @node: 用于负载平衡的节点索引
+ * @pending_mask: 待处理的重新平衡中断
+ * @threads_active: 当前正在运行的 irqaction 线程数量
+ * @wait_for_threads: 同步 irq 等待线程处理程序的等待队列
+ * @dir: /proc/irq/ procfs 条目
+ * @name: 用于 /proc/interrupts 输出的流处理程序名称
  */
+// 中断描述符
 struct irq_desc {
 	unsigned int		irq;
 	struct timer_rand_state *timer_rand_state;
@@ -179,18 +217,27 @@ struct irq_desc {
 #ifdef CONFIG_INTR_REMAP
 	struct irq_2_iommu      *irq_2_iommu;
 #endif
+	/*
+	handle_irq就是highlevel irq-events handler，何谓high level？站在高处自然看不到细节。我认为high level是和specific相对，specific handler处理具体的事务，例如处理一个按键中断、处理一个磁盘中断。而high level则是对处理各种中断交互过程的一个抽象，根据下列硬件的不同：
+	（a）中断控制器
+	（b）IRQ trigger type highlevel irq-events handler可以分成：
+	（a）处理电平触发类型的中断handler（handle_level_irq）
+	（b）处理边缘触发类型的中断handler（handle_edge_irq）
+	（c）处理简单类型的中断handler（handle_simple_irq）
+	（d）处理EOI类型的中断handler（handle_fasteoi_irq）
+	*/
 	irq_flow_handler_t	handle_irq;
 	struct irq_chip		*chip;
 	struct msi_desc		*msi_desc;
 	void			*handler_data;
 	void			*chip_data;
-	struct irqaction	*action;	/* IRQ action list */
-	unsigned int		status;		/* IRQ status */
+	struct irqaction	*action;	/* IRQ action list */		// 一个irq（中断）线上可能有多个设备，将多个设备串起来
+	unsigned int		status;		/* IRQ status */	/* 中断状态，可以通过设置该变量来关闭该中断 */
 
-	unsigned int		depth;		/* nested irq disables */
-	unsigned int		wake_depth;	/* nested wake enables */
-	unsigned int		irq_count;	/* For detecting broken IRQs */
-	unsigned long		last_unhandled;	/* Aging timer for unhandled count */
+	unsigned int		depth;		/* nested irq disables */		/* 嵌套的 irq 禁用计数 */
+	unsigned int		wake_depth;	/* nested wake enables */	/* 嵌套的唤醒启用计数 */
+	unsigned int		irq_count;	/* For detecting broken IRQs */	/* 用于检测中断异常的统计字段 */
+	unsigned long		last_unhandled;	/* Aging timer for unhandled count */	/* 未处理计数的老化定时器 */
 	unsigned int		irqs_unhandled;
 	raw_spinlock_t		lock;
 #ifdef CONFIG_SMP
@@ -213,6 +260,7 @@ extern void arch_init_copy_chip_data(struct irq_desc *old_desc,
 extern void arch_free_chip_data(struct irq_desc *old_desc, struct irq_desc *desc);
 
 #ifndef CONFIG_SPARSE_IRQ
+// 中断描述符表
 extern struct irq_desc irq_desc[NR_IRQS];
 #endif
 

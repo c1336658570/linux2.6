@@ -213,8 +213,10 @@ static void set_dentry_child_flags(struct inode *inode, int watched)
 static struct inotify_watch *inode_find_handle(struct inode *inode,
 					       struct inotify_handle *ih)
 {
+	// 此函数是在inode结构串联起来的inotify_watches链表中，搜寻其inotify_handle与所提供的句柄相匹配的inotify_watch项
 	struct inotify_watch *watch;
 
+	// 遍历链表的具体示例，遍历了inode->inotify_watches链表的所有项，每个项都是struct inotify_watch，list_head在此结构被命名为i_list
 	list_for_each_entry(watch, &inode->inotify_watches, i_list) {
 		if (watch->ih == ih)
 			return watch;
@@ -451,9 +453,11 @@ EXPORT_SYMBOL_GPL(inotify_unmount_inodes);
  */
 void inotify_inode_is_dead(struct inode *inode)
 {
+	// 该函数遍历并删除inotify_watches链表中的所有项
 	struct inotify_watch *watch, *next;
 
 	mutex_lock(&inode->inotify_mutex);
+	// 使用list_for_each_entry_safe宏遍历并删除链表节点的示例
 	list_for_each_entry_safe(watch, next, &inode->inotify_watches, i_list) {
 		struct inotify_handle *ih = watch->ih;
 		mutex_lock(&ih->mutex);

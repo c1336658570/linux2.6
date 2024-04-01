@@ -99,19 +99,26 @@ union { \
  *  A kfifo object with the given name and a buffer for the kfifo
  *  object named name##kfifo_buffer
  */
+// 静态声明并初始化kfifo，和下面俩函数功能类似，size必须是2的幂
 #define DEFINE_KFIFO(name, size) \
 	unsigned char name##kfifo_buffer[size]; \
 	struct kfifo name = __kfifo_initializer(size, name##kfifo_buffer)
 
+// 下面这俩初始化kfifo的函数size都必须是2的幂
+// 自己分配缓冲区，调用kfifo_init初始化kfifo
 extern void kfifo_init(struct kfifo *fifo, void *buffer,
 			unsigned int size);
+// kfifo_alloc函数分配缓冲区，初始化kfifo，成功返回0,失败返回一个负数错误玛，kfifo的内存空间由kfifo_alloc分配
 extern __must_check int kfifo_alloc(struct kfifo *fifo, unsigned int size,
 			gfp_t gfp_mask);
+// 撤销通过kfifo_alloc分配的队列
 extern void kfifo_free(struct kfifo *fifo);
+// 向kfifo推入数据，把from指针所指的len字节数据拷贝到fifo所指的队列中。成功返回推入字节数。如果队列空闲字节小于len，返回值可能小于len。甚至返回0,代表没有任何数据被推入
 extern unsigned int kfifo_in(struct kfifo *fifo,
 				const void *from, unsigned int len);
 extern __must_check unsigned int kfifo_out(struct kfifo *fifo,
 				void *to, unsigned int len);
+// 从队列查看数据而不读取，返回值为实际查看的数据长度，单位为字节
 extern __must_check unsigned int kfifo_out_peek(struct kfifo *fifo,
 				void *to, unsigned int len, unsigned offset);
 
@@ -130,6 +137,7 @@ static inline bool kfifo_initialized(struct kfifo *fifo)
  * kfifo_reset - removes the entire FIFO contents
  * @fifo: the fifo to be emptied.
  */
+// 重置kfifo
 static inline void kfifo_reset(struct kfifo *fifo)
 {
 	fifo->in = fifo->out = 0;
@@ -149,6 +157,7 @@ static inline void kfifo_reset_out(struct kfifo *fifo)
  * kfifo_size - returns the size of the fifo in bytes
  * @fifo: the fifo to be used.
  */
+// 获取队列长度，以字节为单位
 static inline __must_check unsigned int kfifo_size(struct kfifo *fifo)
 {
 	return fifo->size;
@@ -158,6 +167,7 @@ static inline __must_check unsigned int kfifo_size(struct kfifo *fifo)
  * kfifo_len - returns the number of used bytes in the FIFO
  * @fifo: the fifo to be used.
  */
+// 返回kfifo队列中已经推入的数据大小
 static inline unsigned int kfifo_len(struct kfifo *fifo)
 {
 	register unsigned int	out;
@@ -171,6 +181,7 @@ static inline unsigned int kfifo_len(struct kfifo *fifo)
  * kfifo_is_empty - returns true if the fifo is empty
  * @fifo: the fifo to be used.
  */
+// kfifo如果空，返回0
 static inline __must_check int kfifo_is_empty(struct kfifo *fifo)
 {
 	return fifo->in == fifo->out;
@@ -180,6 +191,7 @@ static inline __must_check int kfifo_is_empty(struct kfifo *fifo)
  * kfifo_is_full - returns true if the fifo is full
  * @fifo: the fifo to be used.
  */
+// 如果kfifo满，返回0
 static inline __must_check int kfifo_is_full(struct kfifo *fifo)
 {
 	return kfifo_len(fifo) == kfifo_size(fifo);
@@ -189,6 +201,7 @@ static inline __must_check int kfifo_is_full(struct kfifo *fifo)
  * kfifo_avail - returns the number of bytes available in the FIFO
  * @fifo: the fifo to be used.
  */
+// 得到kfifo队列中还有多少可用空间
 static inline __must_check unsigned int kfifo_avail(struct kfifo *fifo)
 {
 	return kfifo_size(fifo) - kfifo_len(fifo);

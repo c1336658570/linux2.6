@@ -36,35 +36,51 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/workqueue.h>
 
+// 工作者线程执行worker_thread函数，在worker_thread中死循环
+
+// 每一个工作者线程由一个cpu_workqueue_struct结构体表示。而workqueue_struct结构体则表示给定类型的所有工作者线程。
+
 /*
  * The per-CPU workqueue (if single thread, we always use the first
  * possible cpu).
  */
+// 每一个工作者线程都有一个这样的结构体。假如只有一种工作者线程的话那么该结构有16个，因为cpu有16个，每一种工作线程在每个cpu上都需要有实例
 struct cpu_workqueue_struct {
 
-	spinlock_t lock;
+	spinlock_t lock;		// 锁，保护这种结构
 
-	struct list_head worklist;
+	struct list_head worklist;		// 工作列表
 	wait_queue_head_t more_work;
-	struct work_struct *current_work;
+	struct work_struct *current_work;		// 指向当前工作
 
-	struct workqueue_struct *wq;
-	struct task_struct *thread;
+	struct workqueue_struct *wq;		// 关联工作队列结构（即所属的工作者线程的类型）
+	struct task_struct *thread;			// 关联线程
 } ____cacheline_aligned;
 
 /*
  * The externally visible workqueue abstraction is an array of
  * per-CPU workqueues:
  */
+
+// 每种!!!(记住是种不是个)工作者线程有一个这样的结构体。
+// 一种!!!(记住是种不是个)工作者线程有一个这样的结构体，然后在这个结构体内部有一个cpu_workqueue_struct组成的数组，数组的每一个元素代表该种工作者线程在每一个cpu上的实例
+
+// 每个工作者线程类型关联一个自己的workqueue_struct。该结构体里面，给每个线程分配一个cpu_workqueue_struct，
+// 因而也就是给每个处理器分配一个，因为每个处理器都有一个该类型的工作者线程
+
+// 外部可见的工作队列抽象是由每个CPU的工作队列组成的数组
 struct workqueue_struct {
-	struct cpu_workqueue_struct *cpu_wq;
-	struct list_head list;
+	// 由cpu_workqueue_struct结构组成的数组，数组每一项对应系统中一个处理器，
+	// 系统每一个CPU对应一个工作者线程，所以对于给定计算机来说，就是每个处理器，
+	// 每个工作者线程对应一个这样的cpu_workqueue_struct结构体。
+	struct cpu_workqueue_struct *cpu_wq;		// 一个数组，总数为cpu数，代表者该种工作者线程在每一个cpu上的实体
+	struct list_head list;	// list of all workqueues,用于将多个工作队列连接成链表的链表头节点。
 	const char *name;
-	int singlethread;
-	int freezeable;		/* Freeze threads during suspend */
-	int rt;
+	int singlethread;		// 标志位，表示该工作队列是否只有单个线程在处理工作项。
+	int freezeable;		/* Freeze threads during suspend */	// 标志位，表示在系统挂起期间是否冻结工作者线程。
+	int rt;						// 标志位，表示该工作队列是否为实时工作队列
 #ifdef CONFIG_LOCKDEP
-	struct lockdep_map lockdep_map;
+	struct lockdep_map lockdep_map;		// 用于锁依赖性分析的锁映射结构体。
 #endif
 };
 
@@ -271,6 +287,7 @@ static void __queue_work(struct cpu_workqueue_struct *cwq,
  * We queue the work to the CPU on which it was submitted, but if the CPU dies
  * it can be processed by another CPU.
  */
+// 对指定工作线程进行调度，和schedule_work函数作用雷同，不过变成了指定工作线程(wq)
 int queue_work(struct workqueue_struct *wq, struct work_struct *work)
 {
 	int ret;
@@ -324,6 +341,7 @@ static void delayed_work_timer_fn(unsigned long __data)
  *
  * Returns 0 if @work was already on a queue, non-zero otherwise.
  */
+// 对指定工作线程进行延时调度
 int queue_delayed_work(struct workqueue_struct *wq,
 			struct delayed_work *dwork, unsigned long delay)
 {
@@ -374,11 +392,12 @@ EXPORT_SYMBOL_GPL(queue_delayed_work_on);
 
 static void run_workqueue(struct cpu_workqueue_struct *cwq)
 {
-	spin_lock_irq(&cwq->lock);
-	while (!list_empty(&cwq->worklist)) {
+	spin_lock_irq(&cwq->lock);	// 获取工作队列的自旋锁
+	// 当链表不为空，选取下一个节点对象。
+	while (!list_empty(&cwq->worklist)) {	// 当工作队列中还有任务时循环执行
 		struct work_struct *work = list_entry(cwq->worklist.next,
 						struct work_struct, entry);
-		work_func_t f = work->func;
+		work_func_t f = work->func;	// 获取工作函数
 #ifdef CONFIG_LOCKDEP
 		/*
 		 * It is permissible to free the struct work_struct
@@ -388,23 +407,28 @@ static void run_workqueue(struct cpu_workqueue_struct *cwq)
 		 * as problems when looking into work->lockdep_map,
 		 * make a copy and use that here.
 		 */
-		struct lockdep_map lockdep_map = work->lockdep_map;
+		struct lockdep_map lockdep_map = work->lockdep_map;	// 为了避免锁依赖检测的问题，复制锁依赖映射
 #endif
-		trace_workqueue_execution(cwq->thread, work);
-		debug_work_deactivate(work);
-		cwq->current_work = work;
+		trace_workqueue_execution(cwq->thread, work);	// 跟踪工作队列的执行
+		debug_work_deactivate(work);		// 调试函数，用于禁用工作项的调试标志
+		cwq->current_work = work;		// 设置当前正在执行的工作项
+		// 把该节点从链表上解下来
 		list_del_init(cwq->worklist.next);
-		spin_unlock_irq(&cwq->lock);
+		spin_unlock_irq(&cwq->lock);	// 解锁
 
+		// 检查工作项是否属于当前工作队列
 		BUG_ON(get_wq_data(work) != cwq);
-		work_clear_pending(work);
-		lock_map_acquire(&cwq->wq->lockdep_map);
-		lock_map_acquire(&lockdep_map);
+		// 将待处理标志位pending清零
+		work_clear_pending(work);	// 清除工作项的待处理标志位
+		lock_map_acquire(&cwq->wq->lockdep_map);	// 获取工作队列所属的锁依赖映射
+		lock_map_acquire(&lockdep_map);	// 获取复制的锁依赖映射
+		// 调用函数
 		f(work);
-		lock_map_release(&lockdep_map);
-		lock_map_release(&cwq->wq->lockdep_map);
+		lock_map_release(&lockdep_map);		// 释放复制的锁依赖映射
+		lock_map_release(&cwq->wq->lockdep_map);	// 释放工作队列所属的锁依赖映射
 
 		if (unlikely(in_atomic() || lockdep_depth(current) > 0)) {
+			// 如果当前线程在原子上下文中运行或者有持有的锁，则输出错误信息
 			printk(KERN_ERR "BUG: workqueue leaked lock or atomic: "
 					"%s/0x%08x/%d\n",
 					current->comm, preempt_count(),
@@ -415,33 +439,43 @@ static void run_workqueue(struct cpu_workqueue_struct *cwq)
 			dump_stack();
 		}
 
-		spin_lock_irq(&cwq->lock);
-		cwq->current_work = NULL;
+		spin_lock_irq(&cwq->lock);	// 获取工作队列的自旋锁
+		cwq->current_work = NULL;		// 清空当前正在执行的工作项
 	}
-	spin_unlock_irq(&cwq->lock);
+	spin_unlock_irq(&cwq->lock);	// 解锁工作队列的自旋锁
 }
 
+// 工作者线程执行的函数
 static int worker_thread(void *__cwq)
 {
 	struct cpu_workqueue_struct *cwq = __cwq;
-	DEFINE_WAIT(wait);
+	DEFINE_WAIT(wait);		// 定义一个等待队列，名字是wait，func是autoremove_wake_function
 
+	// 如果工作队列支持冻结操作，则设置当前线程为可冻结状态
 	if (cwq->wq->freezeable)
 		set_freezable();
 
+	// 死循环，当有操作被插入到队列时，线程被唤醒。当没有操作时，它又会睡眠
 	for (;;) {
+		// 线程将自己设置为休眠状态（TASK_INTERRUPTIBLE）
 		prepare_to_wait(&cwq->more_work, &wait, TASK_INTERRUPTIBLE);
+		// 如果当前线程不是可冻结状态、没有收到停止线程的信号、并且工作链表为空
 		if (!freezing(current) &&
 		    !kthread_should_stop() &&
 		    list_empty(&cwq->worklist))
+				//如果工作链表是空，线程调用schedule进入休眠，等待被唤醒
 			schedule();
+		// 如果链表中由对象，线程不会睡眠。相反，它将自己状态设置为TASK_RUNNING，脱离等待队列
 		finish_wait(&cwq->more_work, &wait);
 
+		// 尝试将当前线程冻结，try_to_freeze会检查当前线程是否需要冻结，需要的话就冻结，不需要就直接返回
 		try_to_freeze();
 
+		// 如果收到停止线程的信号，跳出循环，结束线程
 		if (kthread_should_stop())
 			break;
 
+		// 如果链表非空，调用run_workqueue()函数执行被推后的工作
 		run_workqueue(cwq);
 	}
 
@@ -512,6 +546,7 @@ static int flush_cpu_workqueue(struct cpu_workqueue_struct *cwq)
  * This function used to run the workqueues itself.  Now we just wait for the
  * helper threads to do it.
  */
+// 刷新指定的工作队列，函数会一直等待，直到队列中所有对象都被执行以后才返回，只能在进程上下文使用，因为在等待所有待处理工作执行的时候，该函数会进入休眠状态。
 void flush_workqueue(struct workqueue_struct *wq)
 {
 	const struct cpumask *cpu_map = wq_cpu_map(wq);
@@ -730,6 +765,7 @@ static struct workqueue_struct *keventd_wq __read_mostly;
  * queued and leaves it in the same position on the kernel-global
  * workqueue otherwise.
  */
+// 对工作线程进行调度(调度events线程)，工作线程直接会执行
 int schedule_work(struct work_struct *work)
 {
 	return queue_work(keventd_wq, work);
@@ -757,6 +793,7 @@ EXPORT_SYMBOL(schedule_work_on);
  * After waiting for a given time this puts a job in the kernel-global
  * workqueue.
  */
+// 对工作线程进行调度（调度events线程），延迟delay后工作线程才开始执行
 int schedule_delayed_work(struct delayed_work *dwork,
 					unsigned long delay)
 {
@@ -845,6 +882,8 @@ int schedule_on_each_cpu(work_func_t func)
 	return 0;
 }
 
+// 刷新events工作队列，函数会一直等待，直到队列中所有对象都被执行以后才返回，只能在进程上下文使用，因为在等待所有待处理工作执行的时候，该函数会进入休眠状态。
+// 该函数并不取消任何延迟执行的工作，就是说任何通过schedule_delayed_work调度的工作，如果其延迟时间未结束，并不会因为调用flush_scheduled_work()而被刷新掉
 void flush_scheduled_work(void)
 {
 	flush_workqueue(keventd_wq);
@@ -1069,50 +1108,82 @@ void destroy_workqueue(struct workqueue_struct *wq)
 }
 EXPORT_SYMBOL_GPL(destroy_workqueue);
 
+// 该函数在init_workqueues中被使用
+
+// 定义了一个静态函数workqueue_cpu_callback，它是一个CPU热插拔通知的回调函数。
+// nfb是指向notifier_block结构的指针，用于注册和注销通知链。
+// action是通知的动作，表示CPU的状态变化。
+// hcpu是指向CPU的指针。
 static int __devinit workqueue_cpu_callback(struct notifier_block *nfb,
 						unsigned long action,
 						void *hcpu)
 {
+	// 定义了一个整数变量cpu，用于存储CPU的编号。
 	unsigned int cpu = (unsigned long)hcpu;
+	// 定义了指向cpu_workqueue_struct结构的指针cwq。
 	struct cpu_workqueue_struct *cwq;
+	// 定义了指向workqueue_struct结构的指针wq。
 	struct workqueue_struct *wq;
+	// 定义了整数变量ret，用于存储函数的返回值，默认为NOTIFY_OK。
 	int ret = NOTIFY_OK;
 
+	// 清除CPU_TASKS_FROZEN标志位
 	action &= ~CPU_TASKS_FROZEN;
 
 	switch (action) {
+	// 根据action的值进行不同的操作。
 	case CPU_UP_PREPARE:
+		// 如果action是CPU_UP_PREPARE，表示CPU正在准备启动。将当前CPU添加到cpu_populated_map中。
+		// 将CPU添加到cpu_populated_map中
 		cpumask_set_cpu(cpu, cpu_populated_map);
 	}
+// undo标签，用于跳转到该位置进行回滚操作。
 undo:
+	// 遍历工作队列列表
 	list_for_each_entry(wq, &workqueues, list) {
+		// 获取当前CPU对应的cpu_workqueue_struct结构体指针
 		cwq = per_cpu_ptr(wq->cpu_wq, cpu);
 
+		// 根据action的值进行不同的操作。
 		switch (action) {
+			// 如果action是CPU_UP_PREPARE，表示CPU正在准备启动。
 		case CPU_UP_PREPARE:
+			// 创建工作队列线程
 			if (!create_workqueue_thread(cwq, cpu))
 				break;
+			// 打印错误信息
 			printk(KERN_ERR "workqueue [%s] for %i failed\n",
 				wq->name, cpu);
+			// 创建线程失败，将action设置为CPU_UP_CANCELED
 			action = CPU_UP_CANCELED;
+			// 将ret设置为NOTIFY_BAD。
 			ret = NOTIFY_BAD;
+			// 跳转到undo标签处。
 			goto undo;
 
 		case CPU_ONLINE:
+			// 如果action是CPU_ONLINE，表示CPU已经在线。调用start_workqueue_thread函数启动工作队列线程。
+			// 启动工作队列线程
 			start_workqueue_thread(cwq, cpu);
 			break;
 
 		case CPU_UP_CANCELED:
+			// 如果action是CPU_UP_CANCELED，表示CPU启动取消或CPU已死亡。
+			// 启动工作队列线程，参数为-1，表示停止工作队列线程。然后继续执行下面的代码。
 			start_workqueue_thread(cwq, -1);
 		case CPU_POST_DEAD:
+			// 清理工作队列线程
 			cleanup_workqueue_thread(cwq);
 			break;
 		}
 	}
 
 	switch (action) {
+	// 如果action是CPU_UP_CANCELED或CPU_POST_DEAD，表示CPU启动取消或CPU已死亡。
+	// 从cpu_populated_map中移除当前CPU。
 	case CPU_UP_CANCELED:
 	case CPU_POST_DEAD:
+		// 从cpu_populated_map中移除CPU
 		cpumask_clear_cpu(cpu, cpu_populated_map);
 	}
 
@@ -1166,6 +1237,7 @@ long work_on_cpu(unsigned int cpu, long (*fn)(void *), void *arg)
 EXPORT_SYMBOL_GPL(work_on_cpu);
 #endif /* CONFIG_SMP */
 
+// 初始化
 void __init init_workqueues(void)
 {
 	alloc_cpumask_var(&cpu_populated_map, GFP_KERNEL);

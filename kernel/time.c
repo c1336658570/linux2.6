@@ -691,6 +691,8 @@ unsigned long nsecs_to_jiffies(u64 n)
 #endif
 }
 
+// seq锁使用的例子，jiffies存储了linux机器启动到当前的时间
+// 函数返回jiffies的值。
 #if (BITS_PER_LONG < 64)
 u64 get_jiffies_64(void)
 {

@@ -1,3 +1,4 @@
+// 自旋锁，与体系结构相关代码，实际接口在linux/spinlock.h
 #ifndef _ASM_X86_SPINLOCK_H
 #define _ASM_X86_SPINLOCK_H
 

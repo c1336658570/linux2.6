@@ -1,3 +1,4 @@
+// 读写自旋锁的接口文件
 #ifndef __LINUX_RWLOCK_H
 #define __LINUX_RWLOCK_H
 
@@ -24,6 +25,7 @@ do {								\
 	__rwlock_init((lock), #lock, &__key);			\
 } while (0)
 #else
+// 初始化指定的rwlock_t
 # define rwlock_init(lock)					\
 	do { *(lock) = __RW_LOCK_UNLOCKED(lock); } while (0)
 #endif
@@ -58,11 +60,13 @@ do {								\
  * regardless of whether CONFIG_SMP or CONFIG_PREEMPT are set. The various
  * methods are defined as nops in the case they are not required.
  */
+// 尝试获取读锁或写锁，如果不可用返回非0
 #define read_trylock(lock)	__cond_lock(lock, _raw_read_trylock(lock))
 #define write_trylock(lock)	__cond_lock(lock, _raw_write_trylock(lock))
 
-#define write_lock(lock)	_raw_write_lock(lock)
-#define read_lock(lock)		_raw_read_lock(lock)
+// 不能把一个读自旋锁升级为写自旋锁
+#define write_lock(lock)	_raw_write_lock(lock)	// 加写锁
+#define read_lock(lock)		_raw_read_lock(lock)	// 加读锁
 
 #if defined(CONFIG_SMP) || defined(CONFIG_DEBUG_SPINLOCK)
 
@@ -78,12 +82,13 @@ do {								\
 	} while (0)
 
 #else
-
+// 保存本地当前中断并获取读锁
 #define read_lock_irqsave(lock, flags)			\
 	do {						\
 		typecheck(unsigned long, flags);	\
 		_raw_read_lock_irqsave(lock, flags);	\
 	} while (0)
+// 保存本地中断并获取写锁
 #define write_lock_irqsave(lock, flags)			\
 	do {						\
 		typecheck(unsigned long, flags);	\
@@ -92,14 +97,14 @@ do {								\
 
 #endif
 
-#define read_lock_irq(lock)		_raw_read_lock_irq(lock)
-#define read_lock_bh(lock)		_raw_read_lock_bh(lock)
-#define write_lock_irq(lock)		_raw_write_lock_irq(lock)
-#define write_lock_bh(lock)		_raw_write_lock_bh(lock)
-#define read_unlock(lock)		_raw_read_unlock(lock)
-#define write_unlock(lock)		_raw_write_unlock(lock)
-#define read_unlock_irq(lock)		_raw_read_unlock_irq(lock)
-#define write_unlock_irq(lock)		_raw_write_unlock_irq(lock)
+#define read_lock_irq(lock)		_raw_read_lock_irq(lock)	// 禁止本地中断并获得读锁
+#define read_lock_bh(lock)		_raw_read_lock_bh(lock)		// 禁止下半部分并获得读锁
+#define write_lock_irq(lock)		_raw_write_lock_irq(lock)	// 禁止本地中断并获得写锁
+#define write_lock_bh(lock)		_raw_write_lock_bh(lock)		// 禁止下半部分并获得写锁
+#define read_unlock(lock)		_raw_read_unlock(lock)		// 释放读锁
+#define write_unlock(lock)		_raw_write_unlock(lock)	// 释放写锁
+#define read_unlock_irq(lock)		_raw_read_unlock_irq(lock)	// 释放指定读锁并激活本地中断
+#define write_unlock_irq(lock)		_raw_write_unlock_irq(lock)	// 释放指定写锁并激活本地中断
 
 #define read_unlock_irqrestore(lock, flags)			\
 	do {							\

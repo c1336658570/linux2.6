@@ -47,12 +47,14 @@ struct rw_semaphore {
 { 0, __SPIN_LOCK_UNLOCKED(name.wait_lock), LIST_HEAD_INIT((name).wait_list) \
   __RWSEM_DEP_MAP_INIT(name) }
 
+// 创建静态声明的读写信号量
 #define DECLARE_RWSEM(name) \
 	struct rw_semaphore name = __RWSEM_INITIALIZER(name)
 
 extern void __init_rwsem(struct rw_semaphore *sem, const char *name,
 			 struct lock_class_key *key);
 
+// 初始化动态创建的读写信号量
 #define init_rwsem(sem)						\
 do {								\
 	static struct lock_class_key __key;			\

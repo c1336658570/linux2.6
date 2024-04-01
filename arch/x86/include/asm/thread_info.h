@@ -40,6 +40,33 @@ struct thread_info {
 	// 内核代码再一次具有可抢占性的时候
 	// 如果内核中任务显式调用schedule
 	// 内核中的任务阻塞
+	/* 
+	 * 0-7位preemption count
+	 * 在中断上下文中，调度是关闭的，不会发生进程的切换，这属于一种隐式的禁止调度，而在代码中，
+	 * 也可以使用preempt_disable()来显示地关闭调度，
+	 * 关闭次数由第0到7个bits组成的preemption count(注意不是preempt count)来记录。
+	 * 每使用一次preempt_disable()，preemption count的值就会加1，
+	 * 使用preempt_enable()则会让preemption count的值减1。
+	 * preemption count占8个bits，因此一共可以表示最多256层调度关闭的嵌套。
+	 * 处于中断上下文，或者显示地禁止了调度，preempt_count()的值都不为0，都不允许睡眠/调度的发生，
+	 * 这两种场景被统称为atomic上下文，可由in_atomic()宏给出判断。
+	 * 
+	 * preempt_count中的第8到15个bit表示softirq count，它记录了进入softirq的嵌套次数，
+	 * 如果softirq count的值为正数，说明现在正处于softirq上下文中。
+	 * 由于softirq在单个CPU上是不会嵌套执行的，因此和hardirq count一样，实际只需要一个bit(bit 8)就可以了。
+	 * 但这里多出的7个bits并不是因为历史原因多出来的，而是另有他用。
+	 * 这个"他用"就是表示在进程上下文中，为了防止进程被softirq所抢占，关闭/禁止softirq的次数，
+	 * 比如每使用一次local_bh_disable()，softirq count高7个bits(bit 9到bit 15)的值就会加1，
+	 * 使用local_bh_enable()则会让softirq count高7个bits的的值减1。
+	 * 代码中可借助in_softirq()宏快速判断当前是否在softirq上下文
+	 * 
+	 * 
+	 * 16到19个bit表示hardirq count，记录了进入hardirq/top half的嵌套次数。
+	 * irq_enter()用于标记hardirq的进入，此时hardirq count的值会加1。
+	 * irq_exit()用于标记hardirq的退出，hardirq count的值会相应的减1。
+	 * 如果hardirq count的值为正数，说明现在正处于hardirq上下文中，代码中可借助in_irq()宏实现快速判断。
+	 * hardirq count占据4个bits，理论上可以表示16层嵌套，但现在Linux系统并不支持hardirq的嵌套执行，所以实际使用的只有1个bit。
+	 */
 	int			preempt_count;	/* 0 => preemptable,
 						   <0 => BUG */
 	mm_segment_t		addr_limit;

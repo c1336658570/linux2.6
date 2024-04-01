@@ -56,6 +56,7 @@ struct idr_layer {
 	struct rcu_head		 rcu_head;
 };
 
+// 用于映射用户空间的uid
 struct idr {
 	struct idr_layer *top;
 	struct idr_layer *id_free;
@@ -100,17 +101,27 @@ struct idr {
  * This is what we export.
  */
 
+// 根据id查找指针，成功返回id关联的指针，失败返回空指针。如果idr_get_new或idr_get_new_above将空指针映射给UID，那么该函数成功也返回NULL。
 void *idr_find(struct idr *idp, int id);
+// 调整后备树的大小，该函数将在需要时进行UID的分配工作，调整由idp指向的idr的大小。如果真需要调整大小，则内存分配例程使用gfp标识。该函数成功返回1,失败返回0
 int idr_pre_get(struct idr *idp, gfp_t gfp_mask);
+// 获取新的UID,并且将其加到idr的方法是idr_get_new。使用idp所指向的idr去分配一个新的UID，
+// 并且将其关联到指针ptr上。成功返回0,并将新的UID存于id。错误是返回非0的错误玛，错误码时-EAGIN。
+// 说明还需要再次调用idr_pre_get()，如果idr已满，错误码时-ENOSPC。
 int idr_get_new(struct idr *idp, void *ptr, int *id);
+// 该函数使得调用者可以指定一个最小的UID返回值，和idr_get_new()作用相同，确保新的UID大于等于starting_id。使用这个变种方法允许idr的使用者确保UID不会被重用。
 int idr_get_new_above(struct idr *idp, void *ptr, int starting_id, int *id);
 int idr_for_each(struct idr *idp,
 		 int (*fn)(int id, void *p, void *data), void *data);
 void *idr_get_next(struct idr *idp, int *nextid);
 void *idr_replace(struct idr *idp, void *ptr, int id);
+// 从idr中删除UID
 void idr_remove(struct idr *idp, int id);
+// 删除所有的UID，先调用idr_remove_all，再调用idr_destroy就能释放idr占用的所有内存
 void idr_remove_all(struct idr *idp);
+// 撤销idr，如果成功，则只释放idr中未使用的内存，并不释放当前分配给UID使用的任何内存。通过，内核不会撤销idr，除非关闭或卸载，而且只有在没有其他用户时才能删除
 void idr_destroy(struct idr *idp);
+// 初始化一个idr
 void idr_init(struct idr *idp);
 
 

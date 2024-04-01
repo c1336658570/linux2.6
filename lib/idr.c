@@ -117,6 +117,7 @@ static void idr_mark_full(struct idr_layer **pa, int id)
  * If the system is REALLY out of memory this function returns 0,
  * otherwise 1.
  */
+// 调整后备树的大小，该函数将在需要时进行UID的分配工作，调整由idp指向的idr的大小。如果真需要调整大小，则内存分配例程使用gfp标识。该函数成功返回1,失败返回0
 int idr_pre_get(struct idr *idp, gfp_t gfp_mask)
 {
 	while (idp->id_free_cnt < IDR_FREE_MAX) {
@@ -327,6 +328,9 @@ EXPORT_SYMBOL(idr_get_new_above);
  *
  * @id returns a value in the range 0 ... 0x7fffffff
  */
+// 获取新的UID,并且将其加到idr的方法是idr_get_new。使用idp所指向的idr去分配一个新的UID，
+// 并且将其关联到指针ptr上。成功返回0,并将新的UID存于id。错误是返回非0的错误玛，错误码时-EAGIN。
+// 说明还需要再次调用idr_pre_get()，如果idr已满，错误码时-ENOSPC。
 int idr_get_new(struct idr *idp, void *ptr, int *id)
 {
 	int rv;
@@ -684,6 +688,7 @@ void __init idr_init_cache(void)
  * This function is use to set up the handle (@idp) that you will pass
  * to the rest of the functions.
  */
+// 初始化一个idr
 void idr_init(struct idr *idp)
 {
 	memset(idp, 0, sizeof(struct idr));

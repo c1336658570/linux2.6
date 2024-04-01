@@ -1,3 +1,4 @@
+// 和架构相关的读写信号量代码
 /* rwsem.h: R/W semaphores implemented using XADD/CMPXCHG for i486+
  *
  * Written by David Howells (dhowells@redhat.com).
@@ -76,6 +77,7 @@ extern asmregparm struct rw_semaphore *
 
 typedef signed long rwsem_count_t;
 
+// 读写信号量的定义，所有读写信号量的引用计数都等于1，虽然它们只对写者互斥，不对读者。只要没写者，读者数量不限，只有唯一写者可以获得写锁。所有读写锁的睡眠都不能被信号打断
 struct rw_semaphore {
 	rwsem_count_t		count;
 	spinlock_t		wait_lock;
@@ -98,12 +100,14 @@ struct rw_semaphore {
 	LIST_HEAD_INIT((name).wait_list) __RWSEM_DEP_MAP_INIT(name) \
 }
 
+// 创建静态声明的读写信号量
 #define DECLARE_RWSEM(name)					\
 	struct rw_semaphore name = __RWSEM_INITIALIZER(name)
 
 extern void __init_rwsem(struct rw_semaphore *sem, const char *name,
 			 struct lock_class_key *key);
 
+// 初始化动态创建的读写信号量
 #define init_rwsem(sem)						\
 do {								\
 	static struct lock_class_key __key;			\

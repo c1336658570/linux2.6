@@ -17,13 +17,14 @@
  */
 
 #ifndef __ARCH_IRQ_STAT
+// arch/x86/include/asm/hardirq.h
 extern irq_cpustat_t irq_stat[];		/* defined in asm/hardirq.h */
 #define __IRQ_STAT(cpu, member)	(irq_stat[cpu].member)
 #endif
 
   /* arch independent irq_stat fields */
 #define local_softirq_pending() \
-	__IRQ_STAT(smp_processor_id(), __softirq_pending)
+	__IRQ_STAT(smp_processor_id(), __softirq_pending) // 取出对应CPU的irq_stat中的__softirq_pending字段
 
   /* arch dependent irq_stat fields */
 #define nmi_count(cpu)		__IRQ_STAT((cpu), __nmi_count)	/* i386 */

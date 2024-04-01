@@ -187,6 +187,7 @@ typedef u32 phys_addr_t;
 
 typedef phys_addr_t resource_size_t;
 
+// 原子整数
 typedef struct {
 	volatile int counter;
 } atomic_t;

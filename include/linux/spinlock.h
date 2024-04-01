@@ -1,3 +1,4 @@
+// 自旋锁的接口
 #ifndef __LINUX_SPINLOCK_H
 #define __LINUX_SPINLOCK_H
 
@@ -88,6 +89,7 @@
 # include <linux/spinlock_up.h>
 #endif
 
+// 如果开启该选项，就会为使用自旋锁的代码加入许多调试检测手段。例如，开启该选项，内核就会检查是否使用了未初始化的锁，是否在还没加锁就进行解锁操作。如果需要进一步全程调试锁，还应该打开CONFIG_DEBUG_LOCK_ALLOC
 #ifdef CONFIG_DEBUG_SPINLOCK
   extern void __raw_spin_lock_init(raw_spinlock_t *lock, const char *name,
 				   struct lock_class_key *key);
@@ -273,22 +275,26 @@ static inline raw_spinlock_t *spinlock_check(spinlock_t *lock)
 	return &lock->rlock;
 }
 
+// 初始化一个自旋锁，动态创建，只需要传递一个spinlock_t类型的指针
 #define spin_lock_init(_lock)				\
 do {							\
 	spinlock_check(_lock);				\
 	raw_spin_lock_init(&(_lock)->rlock);		\
 } while (0)
 
+// 加锁
 static inline void spin_lock(spinlock_t *lock)
 {
 	raw_spin_lock(&lock->rlock);
 }
 
+// 获取指定锁，并禁止所有下半部分的执行。
 static inline void spin_lock_bh(spinlock_t *lock)
 {
 	raw_spin_lock_bh(&lock->rlock);
 }
 
+// 尝试获取某个自旋锁，如果锁已经被争用，立即返回一个非0值，而不会等自旋锁被释放。如果获得了这个自旋锁，返回0。
 static inline int spin_trylock(spinlock_t *lock)
 {
 	return raw_spin_trylock(&lock->rlock);
@@ -304,11 +310,13 @@ do {									\
 	raw_spin_lock_nest_lock(spinlock_check(lock), nest_lock);	\
 } while (0)
 
+// 加锁并关中断
 static inline void spin_lock_irq(spinlock_t *lock)
 {
 	raw_spin_lock_irq(&lock->rlock);
 }
 
+// 禁止中断同时请求自旋锁（保存中断当前状态，并禁止本地中断，再去获取指定的锁）
 #define spin_lock_irqsave(lock, flags)				\
 do {								\
 	raw_spin_lock_irqsave(spinlock_check(lock), flags);	\
@@ -319,21 +327,25 @@ do {									\
 	raw_spin_lock_irqsave_nested(spinlock_check(lock), flags, subclass); \
 } while (0)
 
+// 解锁
 static inline void spin_unlock(spinlock_t *lock)
 {
 	raw_spin_unlock(&lock->rlock);
 }
 
+// 解锁，并执行与spin_lock_bh相反的操作（开启下半部分）
 static inline void spin_unlock_bh(spinlock_t *lock)
 {
 	raw_spin_unlock_bh(&lock->rlock);
 }
 
+// 解锁并开中断
 static inline void spin_unlock_irq(spinlock_t *lock)
 {
 	raw_spin_unlock_irq(&lock->rlock);
 }
 
+// 解锁并恢复中断
 static inline void spin_unlock_irqrestore(spinlock_t *lock, unsigned long flags)
 {
 	raw_spin_unlock_irqrestore(&lock->rlock, flags);
@@ -359,6 +371,7 @@ static inline void spin_unlock_wait(spinlock_t *lock)
 	raw_spin_unlock_wait(&lock->rlock);
 }
 
+// 用于检测特定的锁是否已经被占用，被占用返回非0,否则返回0。
 static inline int spin_is_locked(spinlock_t *lock)
 {
 	return raw_spin_is_locked(&lock->rlock);

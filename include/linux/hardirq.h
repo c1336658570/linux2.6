@@ -83,9 +83,10 @@
  * Are we doing bottom half or hardware interrupt processing?
  * Are we in a softirq context? Interrupt context?
  */
-#define in_irq()		(hardirq_count())
+#define in_irq()		(hardirq_count())		// 只有在内核确实正在执行中断处理程序时才返回非0（不包括下半部分）
 #define in_softirq()		(softirq_count())
-#define in_interrupt()		(irq_count())
+// 如果内核禁止了软中断也会返回非0
+#define in_interrupt()		(irq_count())		// 如果内核处于任何类型中断中，返回非0，说明正在执行中断处理程序或正在执行下半部处理程序
 
 /*
  * Are we in NMI context?
@@ -125,6 +126,7 @@
 #endif
 
 #if defined(CONFIG_SMP) || defined(CONFIG_GENERIC_HARDIRQS)
+// 等待一个特定的中断处理程序退出。如果该程序正在执行，那么该函数必须推出后才能返回。
 extern void synchronize_irq(unsigned int irq);
 #else
 # define synchronize_irq(irq)	barrier()

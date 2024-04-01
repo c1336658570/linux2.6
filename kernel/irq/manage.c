@@ -27,6 +27,7 @@
  *
  *	This function may be called - with care - from IRQ context.
  */
+// 等待一个特定的中断处理程序退出。如果该程序正在执行，那么该函数必须推出后才能返回。
 void synchronize_irq(unsigned int irq)
 {
 	struct irq_desc *desc = irq_to_desc(irq);
@@ -222,6 +223,8 @@ void __disable_irq(struct irq_desc *desc, unsigned int irq, bool suspend)
  *
  *	This function may be called from IRQ context.
  */
+// 每一次disable_irq_nosync和disable_irq都需要一次enable_irq。只有完成最后一次enable_irq后，才真正激活中断线
+// 禁止中断控制器上指定的中断线，即禁止给定中断向系统中处理器的传递，此函数不会确保所有已经开始执行的中断处理程序已经全部退出
 void disable_irq_nosync(unsigned int irq)
 {
 	struct irq_desc *desc = irq_to_desc(irq);
@@ -250,6 +253,8 @@ EXPORT_SYMBOL(disable_irq_nosync);
  *
  *	This function may be called - with care - from IRQ context.
  */
+// 每一次disable_irq_nosync和disable_irq都需要一次enable_irq。只有完成最后一次enable_irq后，才真正激活中断线
+// 禁止中断控制器上指定的中断线，即禁止给定中断向系统中处理器的传递，此函数还会确保所有已经开始执行的中断处理程序已经全部退出
 void disable_irq(unsigned int irq)
 {
 	struct irq_desc *desc = irq_to_desc(irq);
@@ -259,7 +264,7 @@ void disable_irq(unsigned int irq)
 
 	disable_irq_nosync(irq);
 	if (desc->action)
-		synchronize_irq(irq);
+		synchronize_irq(irq);		// 等待一个铁钉的中断处理程序退出。如果该程序正在执行，那么该函数必须退出后才能返回
 }
 EXPORT_SYMBOL(disable_irq);
 
@@ -299,6 +304,7 @@ void __enable_irq(struct irq_desc *desc, unsigned int irq, bool resume)
  *	This function may be called from IRQ context only when
  *	desc->chip->bus_lock and desc->chip->bus_sync_unlock are NULL !
  */
+// 每一次disable_irq_nosync和disable_irq都需要一次enable_irq。只有完成最后一次enable_irq后，才真正激活中断线
 void enable_irq(unsigned int irq)
 {
 	struct irq_desc *desc = irq_to_desc(irq);
@@ -975,6 +981,7 @@ EXPORT_SYMBOL_GPL(remove_irq);
  *
  *	This function must not be called from interrupt context.
  */
+// 释放irq
 void free_irq(unsigned int irq, void *dev_id)
 {
 	struct irq_desc *desc = irq_to_desc(irq);

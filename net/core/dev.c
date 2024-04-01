@@ -1539,6 +1539,7 @@ static inline void __netif_reschedule(struct Qdisc *q)
 	sd = &__get_cpu_var(softnet_data);
 	q->next_sched = sd->output_queue;
 	sd->output_queue = q;
+	// 触发软中断
 	raise_softirq_irqoff(NET_TX_SOFTIRQ);
 	local_irq_restore(flags);
 }
@@ -1560,6 +1561,7 @@ void dev_kfree_skb_irq(struct sk_buff *skb)
 		sd = &__get_cpu_var(softnet_data);
 		skb->next = sd->completion_queue;
 		sd->completion_queue = skb;
+		// 触发软中断
 		raise_softirq_irqoff(NET_TX_SOFTIRQ);
 		local_irq_restore(flags);
 	}
@@ -6014,6 +6016,7 @@ static int __init net_dev_init(void)
 	if (register_pernet_device(&default_device_ops))
 		goto out;
 
+	// 注册软中断
 	open_softirq(NET_TX_SOFTIRQ, net_tx_action);
 	open_softirq(NET_RX_SOFTIRQ, net_rx_action);
 

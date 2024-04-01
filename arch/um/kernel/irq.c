@@ -330,11 +330,26 @@ int deactivate_all_fds(void)
  * SMP cross-CPU interrupts have their own specific
  * handlers).
  */
+/*
+do_IRQ 处理所有普通设备中断（特殊的 SMP 跨 CPU 中断有它们自己特定的处理程序）。
+*/
 unsigned int do_IRQ(int irq, struct uml_pt_regs *regs)
 {
+	/*
+	 * 首先，它保存了当前的中断处理程序的上下文，通过调用set_irq_regs函数将当前的regs参数设置
+	 * 为中断处理程序的寄存器上下文，并将旧的寄存器上下文保存在old_regs变量中。
+	 * 
+	 * 然后，它调用irq_enter函数，执行中断进入操作，这可能包括一些与中断相关的初始化或准备工作。
+	 * 
+	 * 接下来，它调用__do_IRQ函数来处理实际的中断操作，传递中断号irq作为参数。
+	 * 
+	 * 在完成中断处理后，它调用irq_exit函数，执行中断退出操作，这可能包括一些与中断相关的清理工作。
+	 * 
+	 * 最后，它通过调用set_irq_regs函数将之前保存的旧的寄存器上下文恢复回去。
+	 */
 	struct pt_regs *old_regs = set_irq_regs((struct pt_regs *)regs);
 	irq_enter();
-	__do_IRQ(irq);
+	__do_IRQ(irq);		// __do_IRQ,具体的执行函数
 	irq_exit();
 	set_irq_regs(old_regs);
 	return 1;

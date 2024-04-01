@@ -10,20 +10,22 @@
 struct tvec_base;
 
 struct timer_list {
+	// 定时器链表节点，用于将定时器连接到定时器列表中。通过链表节点，可以将多个定时器组织成一个列表，以便进行管理和遍历。
 	struct list_head entry;
-	unsigned long expires;
+	unsigned long expires;		// 定时器的到期时间（绝对时间）
 
-	void (*function)(unsigned long);
-	unsigned long data;
+	void (*function)(unsigned long);		// 定时器到期时要执行的回调函数
+	unsigned long data;									// 回调函数的参数
 
-	struct tvec_base *base;
+	struct tvec_base *base;							// 定时器所属的时间向量基
 #ifdef CONFIG_TIMER_STATS
-	void *start_site;
-	char start_comm[16];
-	int start_pid;
+	void *start_site;										// 定时器启动位置的指针
+	char start_comm[16];             		// 定时器启动时的进程名
+	int start_pid;                   		// 定时器启动时的进程ID
 #endif
 #ifdef CONFIG_LOCKDEP
-	struct lockdep_map lockdep_map;
+	// 这是锁依赖映射，用于锁依赖检测。在编译时启用了CONFIG_LOCKDEP选项时，定时器会使用这个映射来跟踪相关的锁依赖关系，以检测潜在的死锁和锁相关问题。
+	struct lockdep_map lockdep_map;			// 锁依赖映射，用于锁依赖检测
 #endif
 };
 

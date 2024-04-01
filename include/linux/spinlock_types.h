@@ -61,9 +61,10 @@ typedef struct raw_spinlock {
 
 #define DEFINE_RAW_SPINLOCK(x)	raw_spinlock_t x = __RAW_SPIN_LOCK_UNLOCKED(x)
 
+// 自旋锁的定义
 typedef struct spinlock {
 	union {
-		struct raw_spinlock rlock;
+		struct raw_spinlock rlock;		// raw_spinlock，在上面定义了
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 # define LOCK_PADSIZE (offsetof(struct raw_spinlock, dep_map))
@@ -89,6 +90,7 @@ typedef struct spinlock {
  */
 #define SPIN_LOCK_UNLOCKED	__SPIN_LOCK_UNLOCKED(old_style_spin_init)
 
+// 自旋锁初始化
 #define DEFINE_SPINLOCK(x)	spinlock_t x = __SPIN_LOCK_UNLOCKED(x)
 
 #include <linux/rwlock_types.h>

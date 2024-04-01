@@ -16,15 +16,19 @@
  * using the generic single-entry routines.
  */
 
+// 链表节点
 struct list_head {
 	struct list_head *next, *prev;
 };
 
+// 初始化一个节点
 #define LIST_HEAD_INIT(name) { &(name), &(name) }
 
+// 定义并初始化一个节点
 #define LIST_HEAD(name) \
 	struct list_head name = LIST_HEAD_INIT(name)
 
+// 初始化一个节点
 static inline void INIT_LIST_HEAD(struct list_head *list)
 {
 	list->next = list;
@@ -37,6 +41,7 @@ static inline void INIT_LIST_HEAD(struct list_head *list)
  * This is only for internal list manipulation where we know
  * the prev/next entries already!
  */
+// 在prev之后，next之前插入new
 #ifndef CONFIG_DEBUG_LIST
 static inline void __list_add(struct list_head *new,
 			      struct list_head *prev,
@@ -61,11 +66,17 @@ extern void __list_add(struct list_head *new,
  * Insert a new entry after the specified head.
  * This is good for implementing stacks.
  */
-static inline void list_add(struct list_head *new, struct list_head *head)
-{
-	__list_add(new, head, head->next);
+/**
+list_add - 添加新节点
+@new: 要添加的新节点
+@head: 要在其后添加的链表头
+在指定的链表头后插入一个新节点。
+这对于实现堆栈非常有用。
+*/
+// 给链表添加一个节点，向指定链表节点head节点后插入new节点，如果把最后一个节点当做head，此函数可以用来实现栈
+static inline void list_add(struct list_head *new, struct list_head *head) {
+  __list_add(new, head, head->next);
 }
-
 
 /**
  * list_add_tail - add a new entry
@@ -75,6 +86,7 @@ static inline void list_add(struct list_head *new, struct list_head *head)
  * Insert a new entry before the specified head.
  * This is useful for implementing queues.
  */
+// 把节点添加到链表尾，该函数在head之前插入节点，如果把第一个元素当作head，此函数可以用来实现队列
 static inline void list_add_tail(struct list_head *new, struct list_head *head)
 {
 	__list_add(new, head->prev, head);
@@ -99,6 +111,7 @@ static inline void __list_del(struct list_head * prev, struct list_head * next)
  * Note: list_empty() on entry does not return true after this, the entry is
  * in an undefined state.
  */
+// 从链表删除元素entry，只是断链，不会释放内存
 #ifndef CONFIG_DEBUG_LIST
 static inline void list_del(struct list_head *entry)
 {
@@ -137,6 +150,7 @@ static inline void list_replace_init(struct list_head *old,
  * list_del_init - deletes entry from list and reinitialize it.
  * @entry: the element to delete from the list.
  */
+// 从链表中删除一个节点，并初始化删除的节点
 static inline void list_del_init(struct list_head *entry)
 {
 	__list_del(entry->prev, entry->next);
@@ -148,6 +162,7 @@ static inline void list_del_init(struct list_head *entry)
  * @list: the entry to move
  * @head: the head that will precede our entry
  */
+// 把节点从一个链表移动到另一个链表
 static inline void list_move(struct list_head *list, struct list_head *head)
 {
 	__list_del(list->prev, list->next);
@@ -159,6 +174,7 @@ static inline void list_move(struct list_head *list, struct list_head *head)
  * @list: the entry to move
  * @head: the head that will follow our entry
  */
+// 把节点从一个链表移动到另一个链表尾
 static inline void list_move_tail(struct list_head *list,
 				  struct list_head *head)
 {
@@ -181,6 +197,7 @@ static inline int list_is_last(const struct list_head *list,
  * list_empty - tests whether a list is empty
  * @head: the list to test.
  */
+// 检查链表是否为空，为空返回非0,否则返回0
 static inline int list_empty(const struct list_head *head)
 {
 	return head->next == head;
@@ -287,6 +304,7 @@ static inline void __list_splice(const struct list_head *list,
  * @list: the new list to add.
  * @head: the place to add it in the first list.
  */
+// 合并两个链表，将list指向的链表插入到指定链表的元素head元素后面
 static inline void list_splice(const struct list_head *list,
 				struct list_head *head)
 {
@@ -313,6 +331,7 @@ static inline void list_splice_tail(struct list_head *list,
  *
  * The list at @list is reinitialised
  */
+// 把两个未连接的链表合并到一起，并重新初始化原来的链表
 static inline void list_splice_init(struct list_head *list,
 				    struct list_head *head)
 {
@@ -345,6 +364,16 @@ static inline void list_splice_tail_init(struct list_head *list,
  * @type:	the type of the struct this is embedded in.
  * @member:	the name of the list_struct within the struct.
  */
+/**
+list_entry - 获取该项对应的结构体实例
+@ptr: 指向struct list_head的指针
+@type: 该list_head所嵌入的结构体类型
+@member: 结构体内list_head成员的名称
+这个宏用于从链表结构list_head获取指向整个结构体实例的指针。
+和container_of宏类似,通过利用成员在结构体内的偏移量计算,能够得到容器结构体的起始地址。
+不同的是它操作的对象为链表结构而不是某个普通成员。
+*/
+// 将链表节点恢复为原有的数据类型
 #define list_entry(ptr, type, member) \
 	container_of(ptr, type, member)
 
@@ -364,7 +393,7 @@ static inline void list_splice_tail_init(struct list_head *list,
  * @pos:	the &struct list_head to use as a loop cursor.
  * @head:	the head for your list.
  */
-// 遍历list
+// 遍历list，两个list_head类型参数，第一个参数指向当前项，是必须提供的临时变量，第二个参数是需要便利的链表以头节点形式存在的list_head
 #define list_for_each(pos, head) \
 	for (pos = (head)->next; prefetch(pos->next), pos != (head); \
         	pos = pos->next)
@@ -418,6 +447,7 @@ static inline void list_splice_tail_init(struct list_head *list,
  * @head:	the head for your list.
  * @member:	the name of the list_struct within the struct.
  */
+// 遍历链表，pos是指向包含list_head节点对象的指针，head是一个指向头节点的指针
 #define list_for_each_entry(pos, head, member)				\
 	for (pos = list_entry((head)->next, typeof(*pos), member);	\
 	     prefetch(pos->member.next), &pos->member != (head); 	\
@@ -429,6 +459,7 @@ static inline void list_splice_tail_init(struct list_head *list,
  * @head:	the head for your list.
  * @member:	the name of the list_struct within the struct.
  */
+// 反向遍历链表
 #define list_for_each_entry_reverse(pos, head, member)			\
 	for (pos = list_entry((head)->prev, typeof(*pos), member);	\
 	     prefetch(pos->member.prev), &pos->member != (head); 	\
@@ -492,6 +523,7 @@ static inline void list_splice_tail_init(struct list_head *list,
  * @head:	the head for your list.
  * @member:	the name of the list_struct within the struct.
  */
+// 遍历的同时删除节点，将当前地址节点存入pos，后一个节点地址节点存入n
 #define list_for_each_entry_safe(pos, n, head, member)			\
 	for (pos = list_entry((head)->next, typeof(*pos), member),	\
 		n = list_entry(pos->member.next, typeof(*pos), member);	\
@@ -524,6 +556,7 @@ static inline void list_splice_tail_init(struct list_head *list,
  * Iterate over list of given type from current point, safe against
  * removal of list entry.
  */
+// 反向遍历并删除链表节点
 #define list_for_each_entry_safe_from(pos, n, head, member) 			\
 	for (n = list_entry(pos->member.next, typeof(*pos), member);		\
 	     &pos->member != (head);						\

@@ -56,10 +56,13 @@
 
 #include <asm/irqflags.h>
 
+// 打开本地CPU中断（当前CPU）
 #define local_irq_enable() \
 	do { trace_hardirqs_on(); raw_local_irq_enable(); } while (0)
+// 关闭本地CPU中断（当前CPU）
 #define local_irq_disable() \
 	do { raw_local_irq_disable(); trace_hardirqs_off(); } while (0)
+// 关闭本地CPU中断（当前CPU）
 #define local_irq_save(flags)				\
 	do {						\
 		typecheck(unsigned long, flags);	\
@@ -67,7 +70,7 @@
 		trace_hardirqs_off();			\
 	} while (0)
 
-
+// 将CPU中断恢复到之前状态（当前CPU）
 #define local_irq_restore(flags)			\
 	do {						\
 		typecheck(unsigned long, flags);	\
@@ -111,6 +114,7 @@
 		raw_local_save_flags(flags);		\
 	} while (0)
 
+// 如果本地处理器系统中断被禁止，则返回非0。否则返回0
 #define irqs_disabled()						\
 ({								\
 	unsigned long _flags;					\

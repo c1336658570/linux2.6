@@ -794,6 +794,7 @@ END(interrupt)
  * Entry runs with interrupts off.
  */
 
+# 下面这段都是和进出中断相关的代码，会进入到arch/x86/kernel/irq/do_IRQ中
 /* 0(%rsp): ~(interrupt number) */
 	.macro interrupt func
 	subq $10*8, %rsp

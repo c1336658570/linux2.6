@@ -1,3 +1,4 @@
+// 互斥量相关代码
 /*
  * Mutexes: blocking mutual exclusion locks
  *
@@ -50,6 +51,7 @@ struct mutex {
 	atomic_t		count;
 	spinlock_t		wait_lock;
 	struct list_head	wait_list;
+// CONFIG_DEBUG_MUTEXES是一个配置选项，用来调试互斥量。
 #if defined(CONFIG_DEBUG_MUTEXES) || defined(CONFIG_SMP)
 	struct thread_info	*owner;
 #endif
@@ -78,6 +80,7 @@ struct mutex_waiter {
 # include <linux/mutex-debug.h>
 #else
 # define __DEBUG_MUTEX_INITIALIZER(lockname)
+// 动态初始化mutex
 # define mutex_init(mutex) \
 do {							\
 	static struct lock_class_key __key;		\
@@ -101,6 +104,7 @@ do {							\
 		__DEBUG_MUTEX_INITIALIZER(lockname) \
 		__DEP_MAP_MUTEX_INITIALIZER(lockname) }
 
+// 静态定义mutex
 #define DEFINE_MUTEX(mutexname) \
 	struct mutex mutexname = __MUTEX_INITIALIZER(mutexname)
 
@@ -113,6 +117,7 @@ extern void __mutex_init(struct mutex *lock, const char *name,
  *
  * Returns 1 if the mutex is locked, 0 if unlocked.
  */
+// 如果锁已被争用，则返回1,否则返回0
 static inline int mutex_is_locked(struct mutex *lock)
 {
 	return atomic_read(&lock->count) != 1;
@@ -133,6 +138,7 @@ extern int __must_check mutex_lock_killable_nested(struct mutex *lock,
 #define mutex_lock_interruptible(lock) mutex_lock_interruptible_nested(lock, 0)
 #define mutex_lock_killable(lock) mutex_lock_killable_nested(lock, 0)
 #else
+// 为指定的mutex上锁，如果锁不可用则睡眠
 extern void mutex_lock(struct mutex *lock);
 extern int __must_check mutex_lock_interruptible(struct mutex *lock);
 extern int __must_check mutex_lock_killable(struct mutex *lock);
@@ -148,7 +154,9 @@ extern int __must_check mutex_lock_killable(struct mutex *lock);
  *
  * Returns 1 if the mutex has been acquired successfully, and 0 on contention.
  */
+// 试图获取指定的mutex，如果成功则返回1,否则锁被获取，返回值是0
 extern int mutex_trylock(struct mutex *lock);
+// 为指定mutex解锁
 extern void mutex_unlock(struct mutex *lock);
 extern int atomic_dec_and_mutex_lock(atomic_t *cnt, struct mutex *lock);
 

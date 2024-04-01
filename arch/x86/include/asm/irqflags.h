@@ -34,11 +34,13 @@ static inline void native_restore_fl(unsigned long flags)
 		     :"memory", "cc");
 }
 
+// 关闭本地CPU中断
 static inline void native_irq_disable(void)
 {
 	asm volatile("cli": : :"memory");
 }
 
+// 打开本地CPU中断
 static inline void native_irq_enable(void)
 {
 	asm volatile("sti": : :"memory");
@@ -71,11 +73,13 @@ static inline void raw_local_irq_restore(unsigned long flags)
 	native_restore_fl(flags);
 }
 
+// 关闭本地CPU中断
 static inline void raw_local_irq_disable(void)
 {
 	native_irq_disable();
 }
 
+// 打开本地CPU中断
 static inline void raw_local_irq_enable(void)
 {
 	native_irq_enable();
@@ -102,6 +106,7 @@ static inline void halt(void)
 /*
  * For spinlocks, etc:
  */
+// 关闭本地CPU中断并将之前的中断标志保存到flags
 static inline unsigned long __raw_local_irq_save(void)
 {
 	unsigned long flags = __raw_local_save_flags();
@@ -156,6 +161,7 @@ static inline unsigned long __raw_local_irq_save(void)
 #define raw_local_save_flags(flags)				\
 	do { (flags) = __raw_local_save_flags(); } while (0)
 
+// 关闭本地CPU中断并将之前的中断标志保存到flags
 #define raw_local_irq_save(flags)				\
 	do { (flags) = __raw_local_irq_save(); } while (0)
 

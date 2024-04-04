@@ -98,15 +98,20 @@ SYSCALL_DEFINE1(stime, time_t __user *, tptr)
 
 #endif /* __ARCH_WANT_SYS_TIME */
 
+// 获取系统当前时间
 SYSCALL_DEFINE2(gettimeofday, struct timeval __user *, tv,
 		struct timezone __user *, tz)
 {
+	// 如果tv非空，与体系结构相关的do_gettimeofday()函数将被调用。
 	if (likely(tv != NULL)) {
 		struct timeval ktv;
+		// 该函数通过使用xtmle_lock，进行循环读取xtime的操作
 		do_gettimeofday(&ktv);
+		// 拷贝时发生错误
 		if (copy_to_user(tv, &ktv, sizeof(ktv)))
 			return -EFAULT;
 	}
+	// 如果tz非空，该函数将把系统时区（存放在sys_tz中）返回给用户
 	if (unlikely(tz != NULL)) {
 		if (copy_to_user(tz, &sys_tz, sizeof(sys_tz)))
 			return -EFAULT;
@@ -183,6 +188,7 @@ int do_sys_settimeofday(struct timespec *tv, struct timezone *tz)
 	return 0;
 }
 
+// 设置当前时间，需要CAP_SYS_TIME权能
 SYSCALL_DEFINE2(settimeofday, struct timeval __user *, tv,
 		struct timezone __user *, tz)
 {
@@ -592,8 +598,13 @@ EXPORT_SYMBOL(jiffies_to_timeval);
 /*
  * Convert jiffies/jiffies_64 to clock_t and back.
  */
+// 用于将jiffies（一个用于度量操作系统内核中时间间隔的单位）转换为clock_t类型的值。
+// 内核可以时用jiffies_to_clock_t()将一个由HZ标识的节拍数转换为一个由USER_HZ表示的节拍数（因为USER_HZ可能和内核的HZ不一样，所以需要转换）
 clock_t jiffies_to_clock_t(long x)
 {
+// 用于检查(TICK_NSEC % (NSEC_PER_SEC / USER_HZ))的值是否等于0。
+// TICK_NSEC表示每个tick的纳秒数，NSEC_PER_SEC表示每秒的纳秒数，USER_HZ表示用户空间的每秒tick数。
+// NSEC_PER_SEC / USER_HZ计算结果为每个USER_HZ的纳秒数
 #if (TICK_NSEC % (NSEC_PER_SEC / USER_HZ)) == 0
 # if HZ < USER_HZ
 	return x * (USER_HZ / HZ);
@@ -601,6 +612,7 @@ clock_t jiffies_to_clock_t(long x)
 	return x / (HZ / USER_HZ);
 # endif
 #else
+	// TICK_NSEC不是USER_HZ的整数倍
 	return div_u64((u64)x * TICK_NSEC, NSEC_PER_SEC / USER_HZ);
 #endif
 }

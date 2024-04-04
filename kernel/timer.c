@@ -735,6 +735,8 @@ EXPORT_SYMBOL(mod_timer_pending);
  * (ie. mod_timer() of an inactive timer returns 0, mod_timer() of an
  * active timer returns 1.)
  */
+// 更改已激活的定时器超时时间，也可以操作那些已经初始化但没激活的定时器，如果定时器没激活，那么mod_timer()会激活它。
+// 如果定时器未被激活，该函数返回0，否则返回1。
 int mod_timer(struct timer_list *timer, unsigned long expires)
 {
 	/*
@@ -837,6 +839,10 @@ EXPORT_SYMBOL_GPL(add_timer_on);
  * (ie. del_timer() of an inactive timer returns 0, del_timer() of an
  * active timer returns 1.)
  */
+// 该函数实现在定时器超时前停止定时器
+// 被激活或未被激活的定时器都可以使用，如果定时器未被激活，则该函数返回0,否则返回1。不需要为已经超时的定时器调用该函数，因为他们会自动删除。
+// 该函数只能保证定时器不会再被激活（将来不会执行），如果有多个处理器，该定时器可能已经在其他处理器上运行了，
+// 如果删除定时器同时需要等待可能在其他处理器上运行的定时器处理程序都退出，则可以使用del_timer_sync()来执行删除操作。
 int del_timer(struct timer_list *timer)
 {
 	struct tvec_base *base;
@@ -914,6 +920,7 @@ EXPORT_SYMBOL(try_to_del_timer_sync);
  *
  * The function returns whether it has deactivated a pending timer or not.
  */
+// 如果有多个处理器，删除该定时器时该定时器可能已经在其他处理器上运行了，该函数删除定时器同时需要等待可能在其他处理器上运行的定时器处理程序都退出
 int del_timer_sync(struct timer_list *timer)
 {
 #ifdef CONFIG_LOCKDEP
@@ -1190,18 +1197,20 @@ unsigned long get_next_timer_interrupt(unsigned long now)
  * Called from the timer interrupt handler to charge one tick to the current
  * process.  user_tick is 1 if the tick is user time, 0 for system.
  */
+// 该函数更新所耗费的各种节拍数。通过user_tick区别是花费在用户空间还是内核空间
 void update_process_times(int user_tick)
 {
 	struct task_struct *p = current;
 	int cpu = smp_processor_id();
 
 	/* Note: this timer irq context must be accounted for as well. */
-	account_process_tick(p, user_tick);
-	run_local_timers();
+	// 注意：也必须对这个时钟irg的上下文说明一下原因
+	account_process_tick(p, user_tick);	// 对进程的时间进行实质性更新
+	run_local_timers();		// 该函数标记了一个软中断(调用raise_softirq)，去处理所有到期的定时器。
 	rcu_check_callbacks(cpu, user_tick);
 	printk_tick();
 	perf_event_do_pending();
-	scheduler_tick();
+	scheduler_tick();			// 减少当前运行进程的时间片计数值，并在需要时设置need_resched。在SMP机器中，该函数还负责平衡每个处理器上的运行队列。
 	run_posix_cpu_timers(p);
 }
 
@@ -1220,11 +1229,13 @@ static void run_timer_softirq(struct softirq_action *h)
 
 /*
  * Called by the local, per-CPU timer interrupt on SMP.
+ * 由 SMP 上的本地、每 CPU 定时器中断调用。
  */
+// 标记一个软中断，区调用定时器。
 void run_local_timers(void)
 {
 	hrtimer_run_queues();
-	raise_softirq(TIMER_SOFTIRQ);
+	raise_softirq(TIMER_SOFTIRQ);	// 执行定时器软中断
 	softlockup_tick();
 }
 
@@ -1233,12 +1244,12 @@ void run_local_timers(void)
  * without sampling the sequence number in xtime_lock.
  * jiffies is defined in the linker script...
  */
-
 void do_timer(unsigned long ticks)
 {
+	// 对jiffies_64加ticks
 	jiffies_64 += ticks;
-	update_wall_time();
-	calc_global_load();
+	update_wall_time();		// 根据流逝的时间更新墙上时钟
+	calc_global_load();		// 更新系统的平均负载统计值
 }
 
 #ifdef __ARCH_WANT_SYS_ALARM
@@ -1318,6 +1329,8 @@ SYSCALL_DEFINE0(getegid)
 
 #endif
 
+// 负责将__data值性的进程设置为TASK_RUNNING状态，并放入运行队列。
+// 如果任务被提前唤醒(收到信号)，那么定时器被撤销，process_timeout()函数返回剩余的时间
 static void process_timeout(unsigned long __data)
 {
 	wake_up_process((struct task_struct *)__data);
@@ -1349,13 +1362,34 @@ static void process_timeout(unsigned long __data)
  *
  * In all cases the return value is guaranteed to be non-negative.
  */
+/**
+ * schedule_timeout - 休眠直到超时
+ * @timeout: 超时值（以jiffies为单位）
+ *
+ * 使当前任务休眠，直到经过 @timeout 个 jiffies。除非当前任务状态已设置（参见 set_current_state()），否则该函数将立即返回。
+ *
+ * 您可以通过以下方式设置任务状态 -
+ *
+ * %TASK_UNINTERRUPTIBLE - 至少保证在函数返回之前经过 @timeout 个 jiffies。函数将返回0。
+ *
+ * %TASK_INTERRUPTIBLE - 如果当前任务收到信号，则函数可能提前返回。在这种情况下，将返回剩余的超时时间（以jiffies为单位），如果定时器已在超时前到期，则返回0。
+ *
+ * 当该函数返回时，当前任务的状态保证为 TASK_RUNNING。
+ *
+ * 如果将 @timeout 值设置为 %MAX_SCHEDULE_TIMEOUT，将在没有超时限制的情况下调度CPU。此时返回值将为 %MAX_SCHEDULE_TIMEOUT。
+ *
+ * 在所有情况下，返回值保证为非负数。
+ */
+// 该方法会让需要延迟执行的任务睡眠到指定的延迟时间耗尽后再重新运行，timeout时延迟的相对时间，单位时jiffies。
+// 先调用set_current_state(TASK_INTERRUPTIBLE);将进程设置为可中断睡眠状态，在调用schedule_timeout(s*HZ)让进程谁s秒后唤醒
 signed long __sched schedule_timeout(signed long timeout)
 {
-	struct timer_list timer;
+	struct timer_list timer;	// 创建一个定时器timer
 	unsigned long expire;
 
 	switch (timeout)
 	{
+		// 任务无限期睡眠
 	case MAX_SCHEDULE_TIMEOUT:
 		/*
 		 * These two special cases are useful to be comfortable
@@ -1374,6 +1408,10 @@ signed long __sched schedule_timeout(signed long timeout)
 		 * should never happens anyway). You just have the printk()
 		 * that will tell you if something is gone wrong and where.
 		 */
+		/*
+		 * 这是一个防错机制。请注意，内核的任何部分都不应检查 schedule_timeout() 的负返回值（因为它本身不应该发生）。只有 printk() 会告诉您是否出现了问题以及出现问题的位置。
+		 * 这里将任务状态设置为 TASK_RUNNING，并输出错误消息。
+		 */
 		if (timeout < 0) {
 			printk(KERN_ERR "schedule_timeout: wrong timeout "
 				"value %lx\n", timeout);
@@ -1383,20 +1421,26 @@ signed long __sched schedule_timeout(signed long timeout)
 		}
 	}
 
+	// 定时器的超时时间
 	expire = timeout + jiffies;
 
+	// 设置定时器的执行函数，并初始化定时器，定时器执行函数为process_timeout，参数为当前进程的task_struct(current)
+	// 然后当定时器触发时执行process_timeout，process_timeout负责唤醒当前这个进程（通过task_struct）。
+	// 如果任务被提前唤醒(收到信号)，那么定时器被撤销，函数返回剩余的时间
 	setup_timer_on_stack(&timer, process_timeout, (unsigned long)current);
-	__mod_timer(&timer, expire, false, TIMER_NOT_PINNED);
-	schedule();
+	__mod_timer(&timer, expire, false, TIMER_NOT_PINNED);	// 时器的到期时间，并激活定时器
+	schedule();		// 调度，直到定时器到期或当前任务收到信号
+	// 同步删除定时器
 	del_singleshot_timer_sync(&timer);
 
 	/* Remove the timer from the object tracker */
+	// 同步删除定时器
 	destroy_timer_on_stack(&timer);
 
 	timeout = expire - jiffies;
 
  out:
-	return timeout < 0 ? 0 : timeout;
+	return timeout < 0 ? 0 : timeout;	// 返回0或返回剩余时间
 }
 EXPORT_SYMBOL(schedule_timeout);
 

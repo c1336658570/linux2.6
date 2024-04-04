@@ -113,10 +113,13 @@ void __delay(unsigned long loops)
 }
 EXPORT_SYMBOL(__delay);
 
+// 利用循环来实现延迟执行
 inline void __const_udelay(unsigned long xloops)
 {
 	int d0;
 
+	// loops_per_jiffy存储了处理器在空闲时速度，延迟函数利用loops_per_jiffy值来计算为提供精确延迟而需要多少次循环
+	// 内核启动时利用calibrate_delay()计算loops_per_jiffy值，该函数在init/main.c中
 	xloops *= 4;
 	asm("mull %%edx"
 		:"=d" (xloops), "=&a" (d0)

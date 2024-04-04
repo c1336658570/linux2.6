@@ -161,8 +161,13 @@ static inline unsigned long regs_return_value(struct pt_regs *regs)
 static inline int user_mode(struct pt_regs *regs)
 {
 #ifdef CONFIG_X86_32
+// 如果系统配置为32位x86架构
+	// 检查CS寄存器的RPL（请求特权级）位掩码是否与USER_RPL相等，如果相等则返回真。
+	// 这意味着寄存器集来自保护模式且具有RPL-3的CS值。
 	return (regs->cs & SEGMENT_RPL_MASK) == USER_RPL;
 #else
+	// 对于64位架构
+	// 检查CS寄存器的低2位是否为1，如果是则表示用户模式，返回真。
 	return !!(regs->cs & 3);
 #endif
 }

@@ -153,7 +153,12 @@ __cacheline_aligned_in_smp DEFINE_SEQLOCK(xtime_lock);
  * - wall_to_monotonic is no longer the boot time, getboottime must be
  * used instead.
  */
-struct timespec xtime __attribute__ ((aligned (16)));
+// xtime.tv_sec以秒为单位，存储自1970年1月1日（UTC）以来经过的时间。
+// xtime.v_nsec记录自上一秒开始经过的纳秒数。
+// 读写xtime首先需要加所（xtime_lock），该锁是个计数锁
+// write_seqlock(&xtime_lock);
+// write_sequnlock(&xtime_lock);
+struct timespec xtime __attribute__ ((aligned (16)));	// 实际时间（墙上时间）的定义
 struct timespec wall_to_monotonic __attribute__ ((aligned (16)));
 static struct timespec total_sleep_time;
 
@@ -225,6 +230,7 @@ void getnstimeofday(struct timespec *ts)
 
 	WARN_ON(timekeeping_suspended);
 
+	// 通过读xitme获取当前系统时间，需要加读锁（xtime_lock）
 	do {
 		seq = read_seqbegin(&xtime_lock);
 

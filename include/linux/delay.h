@@ -28,12 +28,14 @@ extern unsigned long loops_per_jiffy;
 #endif
 
 #ifndef mdelay
+// 延迟n毫秒，udelay时延迟n纳秒，定义在arch/x86/include/asm/delay.h
 #define mdelay(n) (\
 	(__builtin_constant_p(n) && (n)<=MAX_UDELAY_MS) ? udelay((n)*1000) : \
 	({unsigned long __ms=(n); while (__ms--) udelay(1000);}))
 #endif
 
 #ifndef ndelay
+// 延迟n纳秒
 static inline void ndelay(unsigned long x)
 {
 	udelay(DIV_ROUND_UP(x, 1000));

@@ -3063,6 +3063,7 @@ calc_load(unsigned long load, unsigned long exp, unsigned long active)
  * calc_load - update the avenrun load estimates 10 ticks after the
  * CPUs have updated calc_load_tasks.
  */
+// 更新系统的平均负载统计值
 void calc_global_load(void)
 {
 	unsigned long upd = calc_load_update + 10;
@@ -3523,6 +3524,7 @@ void thread_group_times(struct task_struct *p, cputime_t *ut, cputime_t *st)
  * It also gets called by the fork code, when changing the parent's
  * timeslices.
  */
+// 减少当前运行进程的时间片计数值，并在需要时设置need_resched。在SMP机器中，该函数还负责平衡每个处理器上的运行队列。
 void scheduler_tick(void)
 {
 	int cpu = smp_processor_id();
@@ -3540,6 +3542,7 @@ void scheduler_tick(void)
 	perf_event_task_tick(curr);
 
 #ifdef CONFIG_SMP
+	// 平衡每个处理器上的运行队列
 	rq->idle_at_tick = idle_cpu(cpu);
 	trigger_load_balance(rq, cpu);
 #endif

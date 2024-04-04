@@ -12,12 +12,12 @@ struct tvec_base;
 struct timer_list {
 	// 定时器链表节点，用于将定时器连接到定时器列表中。通过链表节点，可以将多个定时器组织成一个列表，以便进行管理和遍历。
 	struct list_head entry;
-	unsigned long expires;		// 定时器的到期时间（绝对时间）
+	unsigned long expires;		// 定时器的到期时间（绝对时间），以jiffies为单位的定时值。
 
 	void (*function)(unsigned long);		// 定时器到期时要执行的回调函数
-	unsigned long data;									// 回调函数的参数
+	unsigned long data;									// 回调函数的参数，data参数使我们可以利用同一个处理函数注册多个定时器，只要data参数不同就可以
 
-	struct tvec_base *base;							// 定时器所属的时间向量基
+	struct tvec_base *base;							// 定时器内部值，用户不要使用
 #ifdef CONFIG_TIMER_STATS
 	void *start_site;										// 定时器启动位置的指针
 	char start_comm[16];             		// 定时器启动时的进程名
@@ -66,6 +66,7 @@ void init_timer_deferrable_key(struct timer_list *timer,
 			       struct lock_class_key *key);
 
 #ifdef CONFIG_LOCKDEP
+// 初始化定义的定时器
 #define init_timer(timer)						\
 	do {								\
 		static struct lock_class_key __key;			\
@@ -97,6 +98,7 @@ void init_timer_deferrable_key(struct timer_list *timer,
 					 (fn), (data));			\
 	} while (0)
 #else
+// 初始化定义的定时器
 #define init_timer(timer)\
 	init_timer_key((timer), NULL, NULL)
 #define init_timer_deferrable(timer)\
@@ -162,7 +164,13 @@ static inline int timer_pending(const struct timer_list * timer)
 }
 
 extern void add_timer_on(struct timer_list *timer, int cpu);
+// 该函数实现在定时器超时前停止定时器
+// 被激活或未被激活的定时器都可以使用，如果定时器未被激活，则该函数返回0,否则返回1。不需要为已经超时的定时器调用该函数，因为他们会自动删除。
+// 该函数只能保证定时器不会再被激活（将来不会执行），如果有多个处理器，该定时器可能已经在其他处理器上运行了，
+// 如果删除定时器同时需要等待可能在其他处理器上运行的定时器处理程序都退出，则可以使用del_timer_sync()来执行删除操作。
 extern int del_timer(struct timer_list * timer);
+// 更改已激活的定时器超时时间，也可以操作那些已经初始化但没激活的定时器，如果定时器没激活，那么mod_timer()会激活它。
+// 如果定时器未被激活，该函数返回0，否则返回1。
 extern int mod_timer(struct timer_list *timer, unsigned long expires);
 extern int mod_timer_pending(struct timer_list *timer, unsigned long expires);
 extern int mod_timer_pinned(struct timer_list *timer, unsigned long expires);
@@ -225,11 +233,14 @@ static inline void timer_stats_timer_clear_start_info(struct timer_list *timer)
 }
 #endif
 
+// 激活定时器
 extern void add_timer(struct timer_list *timer);
 
 #ifdef CONFIG_SMP
   extern int try_to_del_timer_sync(struct timer_list *timer);
-  extern int del_timer_sync(struct timer_list *timer);
+	// 如果有多个处理器，删除该定时器时该定时器可能已经在其他处理器上运行了，该函数删除定时器同时需要等待可能在其他处理器上运行的定时器处理程序都退出
+	// 该函数不能在中断上下文中使用
+	extern int del_timer_sync(struct timer_list *timer);
 #else
 # define try_to_del_timer_sync(t)	del_timer(t)
 # define del_timer_sync(t)		del_timer(t)

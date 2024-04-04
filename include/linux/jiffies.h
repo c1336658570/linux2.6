@@ -78,7 +78,36 @@
  * without sampling the sequence number in xtime_lock.
  * get_jiffies_64() will do this for you as appropriate.
  */
+// 32位系统，访问jiffies的代码会读取jiffies_64的低32位，一般只需要访问jiffies，访问jiffies_64的情况很少，如果要访问jiffies_64，可以通过get_jiffies_64()函数。
+// 64位系统，jiffies和jiffies_64是同一变量，代码即可以直接读取jiffies，也可以调用get_jiffies_64()，它们的作用是相同的
+// 64位的jiffies
 extern u64 __jiffy_data jiffies_64;
+// 全局变量jiffies记录了自系统启动以来产生的节拍总数（时钟中断数），每发生一次时钟中断该值加1。
+// jiffies在32位体系结构是32位，在64位体系结构是64位。
+// 32位系统可能发生回绕（100HZ时钟中断频率，497天就会回绕），所以需要解决这个问题，就使用到了链接脚本，
+// ld链接脚本用于链接内核映像（arch/x86/kernel/vmlinux.lds.S），然后用jiffies_64变量的初值覆盖jiffies变量
+// 32位系统每次访问jiffies变量时实际就访问的时jiffies_64的低32位，这样真正的自系统启动以来产生的节拍总数（时钟中断数）存储在64位变量中，不会地址回绕。
+// 在32位系统，因为32位系统使用的jiffies_64的低32位，所以通过jiffies做定时需要一些特殊的宏做判断
+/**
+ * 下面代码有问题，当32位访问jiffies时可能发生回绕，因为有可能向前进了一位(即向第32位进位了)，
+ * 然后就会导致访问jiffies为0（jiffies_64的低32位(0-31)为0,因为向第32位进位了，jiffies_64的第32位是1）
+ * 因为发生了回绕，jiffies本该是个很大的数值（大于timeout），但因为超时超过它的最大值，反而变成了很小的值。导致if判断结果恰好相反。
+ * 内核提供了4个宏来解决这个问题 time_after，time_before，time_after_eq，time_before_eq，四个宏就在下面几行
+ * unsigned long timeout = jiffies + HZ / 2;	// 0.5s后超时
+ * if (timeout > jiffies) {
+ * 	没有超时
+ * } else {
+ * 	超时了，发生错误
+ * }
+ * 
+ * 上面代码的安全版本
+ * unsigned long timeout = jiffies + HZ / 2;	// 0.5s后超时
+ * if (time_before(jiffies, timeout)) {
+ * 	没有超时
+ * } else {
+ * 	超时了，发生错误
+ * }
+*/
 extern unsigned long volatile __jiffy_data jiffies;
 
 #if (BITS_PER_LONG < 64)
@@ -103,12 +132,27 @@ static inline u64 get_jiffies_64(void)
  * good compiler would generate better code (and a really good compiler
  * wouldn't care). Gcc is currently neither.
  */
+/*
+ * 这些内联函数用于正确处理计时器的回绕问题。强烈建议您使用它们的原因如下：
+ * 1.因为人们经常会忘记处理回绕问题。
+ * 2.如果将来计时器的回绕方式发生变化，您不需要修改驱动代码。
+ * time_after(a, b) 当时间 a 在时间 b 之后时返回 true。
+ * 使用 "<0" 和 ">=0" 来只测试结果的符号。一个好的编译器会生成更好的代码（而一个非常好的编译器则不会关心）。目前的 GCC 不是这两者。
+*/
+// 下面这四个宏，可以正确处理jiffies回绕,a是jiffies，b是需要对比的值。
+// 为了正确比较 jiffies 的值并考虑回绕，这些宏使用了巧妙的技巧。
+// 它们通过将两个时间值的差异转换为有符号数，并检查结果的符号来判断时间的先后顺序。
+// 这样，即使发生 jiffies 回绕，仍然可以正确比较时间。
+
+// 当时间a超过指定的b时，返回真，否则返回假。
 #define time_after(a,b)		\
 	(typecheck(unsigned long, a) && \
 	 typecheck(unsigned long, b) && \
 	 ((long)(b) - (long)(a) < 0))
+// 当时间a没有超过指定的b时，返回真，否则返回假。
 #define time_before(a,b)	time_after(b,a)
 
+// 当两个参数相等，返回真，否则返回假
 #define time_after_eq(a,b)	\
 	(typecheck(unsigned long, a) && \
 	 typecheck(unsigned long, b) && \
@@ -303,6 +347,7 @@ extern void jiffies_to_timespec(const unsigned long jiffies,
 extern unsigned long timeval_to_jiffies(const struct timeval *value);
 extern void jiffies_to_timeval(const unsigned long jiffies,
 			       struct timeval *value);
+// 内核可以时用jiffies_to_clock_t()（在kernel/timer.c中)将一个由HZ标识的节拍数转换为一个由USER_HZ表示的节拍数（因为USER_HZ可能和内核的HZ不一样，所以需要转换）
 extern clock_t jiffies_to_clock_t(long x);
 extern unsigned long clock_t_to_jiffies(unsigned long x);
 extern u64 jiffies_64_to_clock_t(u64 x);

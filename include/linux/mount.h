@@ -47,39 +47,46 @@ struct mnt_namespace;
 
 #define MNT_INTERNAL	0x4000
 
+// 用来描述一个安装文件系统的实例
+// 每一个安装点都由该结构体表示,它包含了安装点相关信息,如位置和安装标志等。
+// 当文件系统被实际安装时，有一个vfsmount结构体在安装点被创建。该结构体用来代表文件系统的实例，即一个安装点
 struct vfsmount {
-	struct list_head mnt_hash;
-	struct vfsmount *mnt_parent;	/* fs we are mounted on */
-	struct dentry *mnt_mountpoint;	/* dentry of mountpoint */
-	struct dentry *mnt_root;	/* root of the mounted tree */
-	struct super_block *mnt_sb;	/* pointer to superblock */
-	struct list_head mnt_mounts;	/* list of children, anchored here */
-	struct list_head mnt_child;	/* and going through their mnt_child */
-	int mnt_flags;
+	struct list_head mnt_hash;		/* 散列表 */
+	struct vfsmount *mnt_parent;	/* fs we are mounted on */	/* 父文件系统，也就是要挂载到哪个文件系统 */
+	struct dentry *mnt_mountpoint;	/* dentry of mountpoint */	/* 安装点的目录项 */
+	struct dentry *mnt_root;	/* root of the mounted tree */		/* 该文件系统的根目录项 */
+	struct super_block *mnt_sb;	/* pointer to superblock */			/* 该文件系统的超级块 */
+	struct list_head mnt_mounts;	/* list of children, anchored here */		/* 子文件系统链表 */
+	struct list_head mnt_child;	/* and going through their mnt_child */		/* 子文件系统链表 */
+	// vfsmount结构还保存了在安装时指定的标志信息，该信息存储在mnt_flags域中
+	// MNT_NOSUID，禁止该文件系统的可执行文件设置setuid和setgid标志
+	// MNT_MODEV，禁止访问该文件系统上的设备文件
+	// MNT_NOEXEC，禁止执行该文件系统上的可执行文件
+	int mnt_flags;		/* 安装标志 */
 	/* 4 bytes hole on 64bits arches */
-	const char *mnt_devname;	/* Name of device e.g. /dev/dsk/hda1 */
-	struct list_head mnt_list;
-	struct list_head mnt_expire;	/* link in fs-specific expiry list */
-	struct list_head mnt_share;	/* circular list of shared mounts */
-	struct list_head mnt_slave_list;/* list of slave mounts */
-	struct list_head mnt_slave;	/* slave list entry */
-	struct vfsmount *mnt_master;	/* slave is on master->mnt_slave_list */
-	struct mnt_namespace *mnt_ns;	/* containing namespace */
-	int mnt_id;			/* mount identifier */
-	int mnt_group_id;		/* peer group identifier */
+	const char *mnt_devname;	/* Name of device e.g. /dev/dsk/hda1 */	/* 设备文件名 e.g. /dev/dsk/hda1 */
+	struct list_head mnt_list;		/* 描述符链表 */
+	struct list_head mnt_expire;	/* link in fs-specific expiry list */		/* 到期链表的入口 */
+	struct list_head mnt_share;	/* circular list of shared mounts */			/* 共享安装链表的入口 */
+	struct list_head mnt_slave_list;/* list of slave mounts */						/* 从安装链表 */
+	struct list_head mnt_slave;	/* slave list entry */										/* 从安装链表的入口 */
+	struct vfsmount *mnt_master;	/* slave is on master->mnt_slave_list */		/* 从安装链表的主人 */
+	struct mnt_namespace *mnt_ns;	/* containing namespace */			/* 相关的命名空间 */
+	int mnt_id;			/* mount identifier */			/* 安装标识符 */
+	int mnt_group_id;		/* peer group identifier */		/* 组标识符 */
 	/*
 	 * We put mnt_count & mnt_expiry_mark at the end of struct vfsmount
 	 * to let these frequently modified fields in a separate cache line
 	 * (so that reads of mnt_flags wont ping-pong on SMP machines)
 	 */
-	atomic_t mnt_count;
-	int mnt_expiry_mark;		/* true if marked for expiry */
-	int mnt_pinned;
-	int mnt_ghosts;
+	atomic_t mnt_count;		/* 使用计数 */
+	int mnt_expiry_mark;		/* true if marked for expiry */		/* 如果标记为到期，则为 True */
+	int mnt_pinned;				/* "钉住"进程计数 */
+	int mnt_ghosts;				/* "镜像"引用计数 */
 #ifdef CONFIG_SMP
-	int __percpu *mnt_writers;
+	int __percpu *mnt_writers;		/* 写者引用计数 */
 #else
-	int mnt_writers;
+	int mnt_writers;							/* 写者引用计数 */
 #endif
 };
 

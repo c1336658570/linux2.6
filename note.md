@@ -84,3 +84,10 @@ M       kernel/fork.c
 M       kernel/time/tick-common.c
 M       kernel/timer.c
 M       mm/slab.c
+M       fs/super.c
+M       include/linux/dcache.h
+M       include/linux/fdtable.h
+M       include/linux/fs.h
+M       include/linux/fs_struct.h
+M       include/linux/mnt_namespace.h
+M       include/linux/mount.h

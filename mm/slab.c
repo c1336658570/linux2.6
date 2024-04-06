@@ -221,13 +221,23 @@ typedef unsigned int kmem_bufctl_t;
  * for a slab, or allocated from an general cache.
  * Slabs are chained into three list: fully used, partial, fully free slabs.
  */
+/* 
+ * struct slab
+ *
+ * 管理 slab 中的对象。放置在为 slab 分配的内存的开始处，
+ * 或者从通用缓存中分配。
+ * Slabs 被链入三个列表：完全使用的、部分使用的、完全空闲的 slabs。
+ */
 struct slab {
-	struct list_head list;
-	unsigned long colouroff;
-	void *s_mem;		/* including colour offset */
+	struct list_head list;		// 满、部分满或空链表
+	unsigned long colouroff;	// slab着色的偏移量
+	// 在slab中的第一个对象
+	void *s_mem;		/* including colour offset */		/* 包括颜色偏移的内存指针，指向 slab 的第一个对象 */
+	// slab中已分配的对象数
 	unsigned int inuse;	/* num of objs active in slab */
+	// 第一个空闲对象（如果有的话）
 	kmem_bufctl_t free;
-	unsigned short nodeid;
+	unsigned short nodeid;	/* 所属 NUMA 节点的 ID */
 };
 
 /*
@@ -290,6 +300,7 @@ struct arraycache_init {
 /*
  * The slab lists for all objects.
  */
+// 包含三个slab链表，slabs_full，slabs_partial和slabs_empty
 struct kmem_list3 {
 	struct list_head slabs_partial;	/* partial list first, better asm code */
 	struct list_head slabs_full;
@@ -1606,6 +1617,7 @@ __initcall(cpucache_init);
  * did not request dmaable memory, we might get it, but that
  * would be relatively rare and ignorable.
  */
+// 用于创建新的slab对象，一个高速缓存有多个slab，当高速缓存中slab对象用完了就需要创建新的slab对象
 static void *kmem_getpages(struct kmem_cache *cachep, gfp_t flags, int nodeid)
 {
 	struct page *page;
@@ -1624,6 +1636,7 @@ static void *kmem_getpages(struct kmem_cache *cachep, gfp_t flags, int nodeid)
 	if (cachep->flags & SLAB_RECLAIM_ACCOUNT)
 		flags |= __GFP_RECLAIMABLE;
 
+	// 分配内存，大小为cachep->gfporder
 	page = alloc_pages_exact_node(nodeid, flags | __GFP_NOTRACK, cachep->gfporder);
 	if (!page)
 		return NULL;
@@ -1653,6 +1666,7 @@ static void *kmem_getpages(struct kmem_cache *cachep, gfp_t flags, int nodeid)
 /*
  * Interface to system's page release.
  */
+// 回收
 static void kmem_freepages(struct kmem_cache *cachep, void *addr)
 {
 	unsigned long i = (1 << cachep->gfporder);
@@ -2094,6 +2108,39 @@ static int __init_refok setup_cpu_cache(struct kmem_cache *cachep, gfp_t gfp)
  * cacheline.  This can be beneficial if you're counting cycles as closely
  * as davem.
  */
+/**
+ * kmem_cache_create - 创建一个缓存。
+ * @name: 在 /proc/slabinfo 中用来识别此缓存的字符串。
+ * @size: 将在此缓存中创建的对象的大小。
+ * @align: 对象所需的对齐。
+ * @flags: SLAB标志。
+ * @ctor: 对象的构造器。
+ *
+ * 成功时返回指向缓存的指针，失败时返回NULL。
+ * 不能在中断内调用，但可以被中断。
+ * @ctor 在缓存分配新页面时运行。
+ *
+ * @name 必须在缓存被销毁之前有效。这意味着调用此函数的模块必须在卸载前销毁缓存。
+ * 注意 kmem_cache_name() 不保证返回相同的指针，因此应用程序必须自行管理它。
+ *
+ * 标志有：
+ *
+ * %SLAB_POISON - 用已知测试模式(a5a5a5a5)填充slab，以捕获对未初始化内存的引用。
+ *
+ * %SLAB_RED_ZONE - 在分配的内存周围插入`红区`来检查缓冲区溢出。
+ *
+ * %SLAB_HWCACHE_ALIGN - 将此缓存中的对象对齐到硬件缓存行。如果你像davem那样仔细计算周期，这可能有益。
+ */
+// 函数用于创建一个新的slab缓存。第一个参数是字符串，存放高速缓存的名字，第二个参数是高速缓存中每个元素的大小，
+// 第三个参数是slab内第一个对象的偏移，用来确保在页内进行特定的对齐。通常0就可以满足，也就是标准对齐。
+// flags参数是可选的设置项，用来控制高速缓存的行为。可以为0,表示没有特殊行为，或者与以下标志进行或运算，在slab.h中存在定义
+// SLAB_HWCACHE_ALIGN
+// SLAB_POISON
+// SLAB_RED_ZONE
+// SLAB_PANIC
+// SLAB_CACHE_DMA
+// 最后一个参数ctor是高速缓存的构造函数。只有在新的页主加到高速缓存，构造函数才被调用。实际上Linux内核的高速缓存不适用构造函数，赋值为NULL即可。
+// 函数成功时返回一个指向所创建的高速缓存的指针，否则返回NULL。该函数可能睡眠，不应在中断上下文调用。
 struct kmem_cache *
 kmem_cache_create (const char *name, size_t size, size_t align,
 	unsigned long flags, void (*ctor)(void *))
@@ -2540,6 +2587,10 @@ EXPORT_SYMBOL(kmem_cache_shrink);
  * The caller must guarantee that noone will allocate memory from the cache
  * during the kmem_cache_destroy().
  */
+// 撤销一个给定高速缓存。该函数不能在中断中调用，因为可能睡眠。该函数调用需要两个条件：
+// 1.高速缓存中所有slab都为空。
+// 2.在调用kmem_cache_destroy()过程中（后）不再访问这个高速缓存。
+// 成功返回0,否则返回非0。
 void kmem_cache_destroy(struct kmem_cache *cachep)
 {
 	BUG_ON(!cachep || in_interrupt());
@@ -3568,6 +3619,8 @@ static inline void __cache_free(struct kmem_cache *cachep, void *objp)
  * Allocate an object from this cache.  The flags are only relevant
  * if the cache has no available objects.
  */
+// 创建高速缓存之后，通过如下函数获取对象。该函数从给定的高速缓存中返回一个指向对象的指针。如果高速缓存的所有slab中
+// 都没有空闲对象，那么slab曾必须通过kmem_getpages()获取新的页，gfp_t类型的参数传递给页面分配函数。应该是GFP_KERNEL或GFP_ATOMIC。
 void *kmem_cache_alloc(struct kmem_cache *cachep, gfp_t flags)
 {
 	void *ret = __cache_alloc(cachep, flags, __builtin_return_address(0));
@@ -3740,6 +3793,7 @@ EXPORT_SYMBOL(__kmalloc);
  * Free an object which was previously allocated from this
  * cache.
  */
+// 释放一个对象，并把它返回给原先的slab，这样就能把cachep中的对象objp标记为空闲
 void kmem_cache_free(struct kmem_cache *cachep, void *objp)
 {
 	unsigned long flags;

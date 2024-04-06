@@ -50,6 +50,7 @@ static inline void vmalloc_init(void)
 }
 #endif
 
+// 分配size个内存（逻辑地址连续，物理地址不连续），返回一个指针，发生错误返回NULL。函数可能睡眠，不能再中断上下文调用，也不能从其他不允许阻塞的情况下调用
 extern void *vmalloc(unsigned long size);
 extern void *vmalloc_user(unsigned long size);
 extern void *vmalloc_node(unsigned long size, int node);
@@ -59,6 +60,7 @@ extern void *vmalloc_32_user(unsigned long size);
 extern void *__vmalloc(unsigned long size, gfp_t gfp_mask, pgprot_t prot);
 extern void *__vmalloc_area(struct vm_struct *area, gfp_t gfp_mask,
 				pgprot_t prot);
+// 释放vmalloc分配的内存，函数可能睡眠，不能从中断上下文中调用。
 extern void vfree(const void *addr);
 
 extern void *vmap(struct page **pages, unsigned int count,

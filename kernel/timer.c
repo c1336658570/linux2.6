@@ -1205,7 +1205,9 @@ void update_process_times(int user_tick)
 
 	/* Note: this timer irq context must be accounted for as well. */
 	// 注意：也必须对这个时钟irg的上下文说明一下原因
-	account_process_tick(p, user_tick);	// 对进程的时间进行实质性更新
+	// 对进程的时间进行实质性更新，它把上一个节拍全部算给了当前进程（要么是内核态运行时间，要么是用户态运行时间），
+	// 实际上，在上一个节拍期间进程可能多次进出内核态，而且可能该进程也不一定是唯一一个运行进程。
+	account_process_tick(p, user_tick);
 	run_local_timers();		// 该函数标记了一个软中断(调用raise_softirq)，去处理所有到期的定时器。
 	rcu_check_callbacks(cpu, user_tick);
 	printk_tick();
@@ -1381,7 +1383,7 @@ static void process_timeout(unsigned long __data)
  * 在所有情况下，返回值保证为非负数。
  */
 // 该方法会让需要延迟执行的任务睡眠到指定的延迟时间耗尽后再重新运行，timeout时延迟的相对时间，单位时jiffies。
-// 先调用set_current_state(TASK_INTERRUPTIBLE);将进程设置为可中断睡眠状态，在调用schedule_timeout(s*HZ)让进程谁s秒后唤醒
+// 先调用set_current_state(TASK_INTERRUPTIBLE);将进程设置为可中断睡眠状态，在调用schedule_timeout(s*HZ)让进程睡s秒后唤醒
 signed long __sched schedule_timeout(signed long timeout)
 {
 	struct timer_list timer;	// 创建一个定时器timer
@@ -1434,7 +1436,7 @@ signed long __sched schedule_timeout(signed long timeout)
 	del_singleshot_timer_sync(&timer);
 
 	/* Remove the timer from the object tracker */
-	// 同步删除定时器
+	// 从对象跟踪器中移除计时器
 	destroy_timer_on_stack(&timer);
 
 	timeout = expire - jiffies;

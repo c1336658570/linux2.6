@@ -87,6 +87,7 @@
 #define DECLARE_PER_CPU(type, name)					\
 	DECLARE_PER_CPU_SECTION(type, name, "")
 
+// 编译时定义每个CPU的变量,为每个CPU创建一个类型为type,名字为name的变量实例.
 #define DEFINE_PER_CPU(type, name)					\
 	DEFINE_PER_CPU_SECTION(type, name, "")
 

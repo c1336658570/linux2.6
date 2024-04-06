@@ -21,7 +21,8 @@
  *
  * manages a cache.
  */
-
+// slab层把不同对象划分成高速缓存组，每个高速缓存组存放不同类型的对象。每种对象对应一个高速缓存，一个高速缓存又存在多个slab，用来给某一种对象分配内存。
+// 每个高速缓存用该结构表示，该结构包含三个链表:slabs_full、slabs_partial和slabs_empty，均存放在kmem_list3结构内
 struct kmem_cache {
 /* 1) per-cpu data, touched during every alloc/free */
 	struct array_cache *array[NR_CPUS];
@@ -124,7 +125,7 @@ static inline size_t slab_buffer_size(struct kmem_cache *cachep)
 	return 0;
 }
 #endif
-
+// 获得以字节为单位的一块内核内存。返回一个指向内存块的指针，内存块至少有size大小。所分配的内存区在物理上是连续的。出错返回NULL。
 static __always_inline void *kmalloc(size_t size, gfp_t flags)
 {
 	struct kmem_cache *cachep;

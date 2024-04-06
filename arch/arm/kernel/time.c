@@ -100,6 +100,7 @@ void do_gettimeofday(struct timeval *tv)
 	unsigned long seq;
 	unsigned long usec, sec;
 
+	// 通过顺序锁循环读取xtime中的值
 	do {
 		seq = read_seqbegin_irqsave(&xtime_lock, flags);
 		usec = system_timer->offset();
@@ -119,6 +120,7 @@ void do_gettimeofday(struct timeval *tv)
 
 EXPORT_SYMBOL(do_gettimeofday);
 
+// 设置系统当前时间，需要CAP_SYS_TIME权能
 int do_settimeofday(struct timespec *tv)
 {
 	time_t wtm_sec, sec = tv->tv_sec;

@@ -1,3 +1,4 @@
+// 和每个单独CPU相关的的接口操作例程,可以在mm/slab.c和asm/percpu.h中找到它们的定义
 #ifndef __LINUX_PERCPU_H
 #define __LINUX_PERCPU_H
 
@@ -26,6 +27,7 @@
  * Must be an lvalue. Since @var must be a simple identifier,
  * we force a syntax error here if it isn't.
  */
+// 返回当前处理器上的指定变量,同时禁止内核抢占.
 #define get_cpu_var(var) (*({				\
 	preempt_disable();				\
 	&__get_cpu_var(var); }))
@@ -34,6 +36,7 @@
  * The weird & is necessary because sparse considers (void)(var) to be
  * a direct dereference of percpu variable (var).
  */
+// 打开内核抢占
 #define put_cpu_var(var) do {				\
 	(void)&(var);					\
 	preempt_enable();				\
@@ -160,10 +163,15 @@ static inline void *pcpu_lpage_remapped(void *kaddr)
 
 #endif /* CONFIG_SMP */
 
+// 第一个参数时要分配的实际字节数,第二个参数是分配时按照多少字节对齐
 extern void __percpu *__alloc_percpu(size_t size, size_t align);
+// 释放所有处理器上指定的每个CPU数据
 extern void free_percpu(void __percpu *__pdata);
 extern phys_addr_t per_cpu_ptr_to_phys(void *addr);
 
+// 运行时给系统每个处理器分配一个指定类型对象的实例,按照单字节对齐——按照给定类型的自然边界对齐。
+// __alignof__是gcc的一个功能，它会返回指定类型或lvalue所需的（或建议的，有些古怪的体系结构并没有字节对齐的要求）对齐的字节数。
+// __alignof__(unsigned long)在x86体系中将返回4
 #define alloc_percpu(type)	\
 	(typeof(type) __percpu *)__alloc_percpu(sizeof(type), __alignof__(type))
 

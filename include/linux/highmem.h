@@ -55,16 +55,24 @@ static inline unsigned int nr_free_highpages(void) { return 0; }
 #define totalhigh_pages 0UL
 
 #ifndef ARCH_HAS_KMAP
+//  映射一个给定的page结构到内核地址空间,这个函数在高端内存或低端内存上都能用.
+// 如果page结构对应的是一个低端内存中的一页,函数只会单纯的返回虚拟地址.
+// 如果页位于高端内存,则会建立一个永久映射,再返回地址.该函数可以睡眠,只能用进程上下文中.
 static inline void *kmap(struct page *page)
 {
 	might_sleep();
 	return page_address(page);
 }
 
+// 当不再需要高端内存时,应该解除映射,通过如下函数完成.
 static inline void kunmap(struct page *page)
 {
 }
 
+// 临时映射,当必须创建一个映射而当前上下文不能睡眠时,内核提供了临时映射(也就是所谓的原子映射).
+// 有一组保留的映射,它们可以存放新创建的临时映射.内核可以原子地把高端内存中的一个页映射到某个保留的映射中.
+// 因此,临时映射可以用在不能睡眠的地方,比如中断处理程序中,因为获取映射时绝不会阻塞
+// 下面函数用于建立一个临时映射,km_type定义在asm/kmap_types.h中
 static inline void *kmap_atomic(struct page *page, enum km_type idx)
 {
 	pagefault_disable();
@@ -72,6 +80,7 @@ static inline void *kmap_atomic(struct page *page, enum km_type idx)
 }
 #define kmap_atomic_prot(page, idx, prot)	kmap_atomic(page, idx)
 
+// 取消临时映射
 #define kunmap_atomic(addr, idx)	do { pagefault_enable(); } while (0)
 #define kmap_atomic_pfn(pfn, idx)	kmap_atomic(pfn_to_page(pfn), (idx))
 #define kmap_atomic_to_page(ptr)	virt_to_page(ptr)

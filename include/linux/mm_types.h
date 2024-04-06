@@ -31,22 +31,43 @@ struct address_space;
  * a page, though if it is a pagecache page, rmap structures can tell us
  * who is mapping it.
  */
+/*
+ * 系统中的每个物理页面都有一个与之关联的 struct page 结构，用于跟踪页面当前的使用情况。
+ * 需要注意的是，我们没有办法跟踪哪个任务正在使用页面，但是如果它是一个页面缓存页，rmap 结构可以告诉我们谁在映射它。
+ */
+// struct page结构用于描述每个物理页
 struct page {
-	unsigned long flags;		/* Atomic flags, some possibly
-					 * updated asynchronously */
-	atomic_t _count;		/* Usage count, see below. */
+	// 存放页的状态。包括页是不是脏的，时不是被锁定在内存中。每一位表示一种状态，共32种，标志定义在include/linux/page-flags.h
+	unsigned long flags;		/* 原子标志，一些可能会被异步更新 */
+	// _count存放页的引用计数——即这个页被引用了多少次（使用次数）。当计数值变为-1时，就说明当前内核没引用它，于是在新分配中就可以使用它。
+	// 内核代码通过page_count()函数来检查这个变量，返回0表示空闲，返回一个正整数表示页在使用。
+	// 一个页可以由页缓存使用（这时，mapping域指向和这个页关联的address_space对象），或者作为私有数据（由private指向），或者作为进程中的映射。
+	atomic_t _count;		/* 使用计数，见下面的说明 */
 	union {
+		/**
+		 * _mapcount表示这个页面被进程映射的个数，即已经映射了多少个用于pte页表：
+		 * _mapcount == -1表示没有pte映射到页面；
+		 * _mapcount == 0表示只有父进程映射了页面；
+		 * _mapcount > 0表示除了父进程外还有其他进程映射了这个页面。
+		 * 如果该page处于伙伴系统中，该值为PAGE_BUDDY_MAPCOUNT_VALUE（-128），内核通过判断该值是否为PAGE_BUDDY_MAPCOUNT_VALUE来确定该page是否属于伙伴系统。
+		 */
 		atomic_t _mapcount;	/* Count of ptes mapped in mms,
 					 * to show when page is mapped
 					 * & limit reverse map searches.
 					 */
 		struct {		/* SLUB */
-			u16 inuse;
-			u16 objects;
+			u16 inuse;			/* 使用中的对象数 */
+			u16 objects;		/* 对象总数 */
 		};
 	};
 	union {
 	    struct {
+		/**
+		 * private ：私有数据指针，由应用场景确定其具体的含义：
+		 * a：如果设置了PG_private标志，表示buffer_heads；
+		 * b：如果设置了PG_swapcache标志，private存储了该page在交换分区中对应的位置信息swp_entry_t。
+		 * c：如果_mapcount = PAGE_BUDDY_MAPCOUNT_VALUE，说明该page位于伙伴系统，private存储该伙伴的阶。
+		 */
 		unsigned long private;		/* Mapping-private opaque data:
 					 	 * usually used for buffer_heads
 						 * if PagePrivate set; used for
@@ -54,6 +75,24 @@ struct page {
 						 * indicates order in the buddy
 						 * system if PG_buddy is set.
 						 */
+						/* 映射私有的不透明数据：
+						 * 如果设置了 PagePrivate，则通常用于 buffer_heads；
+						 * 如果设置了 PageSwapCache，则用于 swp_entry_t；
+						 * 如果设置了 PG_buddy，则表示在伙伴系统中的顺序。
+						 */
+		/**
+		 * mapping成员表示页面所指向的地址空间。内核中的地址空间通常有两个不通的地址空间，一个用于文件映射页面，
+		 * 例如在读取文件时，地址空间用于将文件内容数据与装载数据的存储介质区关联起来。另一个用于匿名映射。
+		 * 内核使用了一个简单直接的方式实现了『一个指针，两种用途』，mapping指针地址的最后两位用于判断是
+		 * 否指匿名映射或KSM页面的地址空间，如果是匿名页面，那么mapping指向匿名页面的地址空间数据结构struct anon_vma。
+		 */
+		/**
+		 * mapping ：有三种含义
+		 * a: 如果mapping = 0，说明该page属于交换缓存（swap cache）；当需要使用地址空间时会指定交换分区的地址空间swapper_space。
+		 * b: 如果mapping != 0，bit[0] = 0，说明该page属于页缓存或文件映射，mapping指向文件的地址空间address_space。
+		 * c: 如果mapping != 0，bit[0] != 0，说明该page为匿名映射，mapping指向struct anon_vma对象。
+		 * 通过mapping恢复anon_vma的方法：anon_vma = (struct anon_vma *)(mapping - PAGE_MAPPING_ANON)。
+		*/
 		struct address_space *mapping;	/* If low bit clear, points to
 						 * inode address_space, or NULL.
 						 * If page mapped as anonymous
@@ -61,20 +100,35 @@ struct page {
 						 * it points to anon_vma object:
 						 * see PAGE_MAPPING_ANON below.
 						 */
+						/* 如果最低位清零，指向 inode 的 address_space，或为 NULL。
+						 * 如果页面被映射为匿名内存，则最低位被设置，并且指向 anon_vma 对象：
+						 * 见下面的 PAGE_MAPPING_ANON。
+						 */
 	    };
 #if USE_SPLIT_PTLOCKS
-	    spinlock_t ptl;
+	    spinlock_t ptl;	// 于分割页表锁（ptl）的自旋锁。如果定义了 USE_SPLIT_PTLOCKS，则使用该字段。
 #endif
-	    struct kmem_cache *slab;	/* SLUB: Pointer to slab */
-	    struct page *first_page;	/* Compound tail pages */
+	    struct kmem_cache *slab;	/* SLUB：指向 slab 的指针 */	// 指向的是slab缓存描述符
+	    struct page *first_page;	/* Compound tail pages */		/* 复合尾页 */
 	};
 	union {
-		pgoff_t index;		/* Our offset within mapping. */
+		/**
+		 * index ：在映射的虚拟空间（vma_area）内的偏移；一个文件可能只映射一部分，假设映射了1M的空间，
+		 * index指的是在1M空间内的偏移，而不是在整个文件内的偏移。
+		 */
+		pgoff_t index;		/* Our offset within mapping. */			/* 页面在映射中的偏移量 */
 		void *freelist;		/* SLUB: freelist req. slab lock */
 	};
+	/**
+	 * lru ：链表头，主要有3个用途：
+	 * a：page处于伙伴系统中时，用于链接相同阶的伙伴（只使用伙伴中的第一个page的lru即可达到目的）。
+	 * b：page属于slab时，page->lru.next指向page驻留的的缓存的管理结构，page->lru.prec指向保存该page的slab的管理结构。
+	 * c：page被用户态使用或被当做页缓存使用时，用于将该page连入zone中相应的lru链表，供内存回收时使用。
+	 */
 	struct list_head lru;		/* Pageout list, eg. active_list
 					 * protected by zone->lru_lock !
 					 */
+					/* 页面回写列表，例如 active_list，由 zone->lru_lock 保护！ */
 	/*
 	 * On machines where all RAM is mapped into kernel address space,
 	 * we can simply calculate the virtual address. On machines with
@@ -85,18 +139,31 @@ struct page {
 	 * Architectures with slow multiplication can define
 	 * WANT_PAGE_VIRTUAL in asm/page.h
 	 */
+	/*
+	 * 在将所有 RAM 映射到内核地址空间的机器上，我们可以直接计算虚拟地址。
+	 * 在具有高内存的机器上，一些内存是动态映射到内核虚拟内存的，因此我们需要一个地方来存储那个地址。
+	 * 注意，在 x86 上，该字段可以是 16 位的... ;)
+	 *
+	 * 具有缓慢乘法的体系结构可以在 asm/page.h 中定义 WANT_PAGE_VIRTUAL
+	 */
 #if defined(WANT_PAGE_VIRTUAL)
+	// virtual域是页的虚拟地址。通常情况下，它就是页在虚拟内存中的地址。有些内存（即所谓的高端内存）并不永久的映射到内核
+	// 地址空间上。这种情况下，这个域为NULL，需要的时候，必须动态地映射这些页。
 	void *virtual;			/* Kernel virtual address (NULL if
-					   not kmapped, ie. highmem) */
+					   not kmapped, ie. highmem) */	/* 内核虚拟地址（如果没有 kmapped，则为 NULL，即 highmem） */
 #endif /* WANT_PAGE_VIRTUAL */
 #ifdef CONFIG_WANT_PAGE_DEBUG_FLAGS
-	unsigned long debug_flags;	/* Use atomic bitops on this */
+	unsigned long debug_flags;	/* Use atomic bitops on this */		/* 在此上执行原子位操作 */
 #endif
 
 #ifdef CONFIG_KMEMCHECK
 	/*
 	 * kmemcheck wants to track the status of each byte in a page; this
 	 * is a pointer to such a status block. NULL if not tracked.
+	 */
+	/*
+	 * kmemcheck 希望跟踪页面中每个字节的状态；这是指向这样一个状态块的指针。
+	 * 如果没有跟踪，则为 NULL。
 	 */
 	void *shadow;
 #endif

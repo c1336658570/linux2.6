@@ -176,6 +176,10 @@ typedef __u16 __bitwise __sum16;
 typedef __u32 __bitwise __wsum;
 
 #ifdef __KERNEL__
+// 内存分配时的标志，分为三类，行为修饰符、区修饰符和类型。
+// 行为修饰符表示内核应该如何分配内存，某些特定情况，只能使用特定方法分配内存，如中断中，分配内存不能睡眠
+// 区修饰符表示从哪分配内存
+// 类型标志组合了行为修饰符和区修饰符，便于使用。
 typedef unsigned __bitwise__ gfp_t;
 typedef unsigned __bitwise__ fmode_t;
 

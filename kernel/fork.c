@@ -193,6 +193,9 @@ void __init fork_init(unsigned long mempages)
 #define ARCH_MIN_TASKALIGN	L1_CACHE_BYTES
 #endif
 	/* create a slab on which task_structs can be allocated */
+	// 内核初始化期间，创建一个名为task_struct的高速缓存，其中存放的类型为struct taks_struct的对象。
+	// 该对象被创建后存放在slab中偏移量为ARCH_MIN_TASKALIGN个字节的地方。不需要检查返回值，因为SLAB_PANIC已经被设置。
+	// 如果分配失败，slab分配器就会调用panic()函数。
 	task_struct_cachep =
 		kmem_cache_create("task_struct", sizeof(struct task_struct),
 			ARCH_MIN_TASKALIGN, SLAB_PANIC | SLAB_NOTRACK, NULL);
@@ -227,7 +230,7 @@ int __attribute__((weak)) arch_dup_task_struct(struct task_struct *dst,
 	return 0;
 }
 
-// 为新进程创建一个内核栈，thread_info结构和task_struct，此值与父进程完全相同
+// 为新进程创建一个内核栈，thread_info结构和task_struct，此值与父进程完全相同.该函数被do_fork调用
 static struct task_struct *dup_task_struct(struct task_struct *orig)
 {
 	struct task_struct *tsk;
@@ -238,12 +241,14 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 
 	prepare_to_copy(orig);
 
+	// 分配一个进程描述符，该宏是kmem_cache_alloc(task_struct_cachep, GFP_KERNEL)的封装
 	tsk = alloc_task_struct();
 	if (!tsk)
 		return NULL;
 
 	ti = alloc_thread_info(tsk);
 	if (!ti) {
+		// 释放进程描述符,并返回给task_struct_cachep slab高速缓存,free_task_struct宏是kmem_cache_free(task_struct_cachep, (tsk))的封装
 		free_task_struct(tsk);
 		return NULL;
 	}

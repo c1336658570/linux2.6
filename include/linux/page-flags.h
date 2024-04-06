@@ -73,62 +73,63 @@
  * SPARSEMEM_EXTREME with !SPARSEMEM_VMEMMAP).
  */
 enum pageflags {
-	PG_locked,		/* Page is locked. Don't touch. */
-	PG_error,
-	PG_referenced,
-	PG_uptodate,
-	PG_dirty,
-	PG_lru,
-	PG_active,
-	PG_slab,
-	PG_owner_priv_1,	/* Owner use. If pagecache, fs may use*/
-	PG_arch_1,
-	PG_reserved,
-	PG_private,		/* If pagecache, has fs-private data */
-	PG_private_2,		/* If pagecache, has fs aux data */
-	PG_writeback,		/* Page is under writeback */
+	PG_locked,		/* Page is locked. Don't touch. */	/* 页面被锁定。不要触碰。 */
+	PG_error,			/* 页面出现了错误。 */
+	PG_referenced,	/* 页面被引用。 */
+	PG_uptodate,		/* 页面内容是有效的。 */
+	PG_dirty,				/* 页面已被修改过，需要被写回。 */
+	PG_lru,					/* 页面在最近最少使用（LRU）列表中。 */
+	PG_active,			/* 页面是活跃的。 */
+	PG_slab,				/* 页面被分配给slab分配器。 */
+	PG_owner_priv_1,	/* Owner use. If pagecache, fs may use*/		/* 页所有者使用。如果是页面缓存，文件系统可能会使用。 */
+	PG_arch_1,			/* 为架构特定的页面状态位保留。 */
+	PG_reserved,		/* 页面被保留，永远不会被交换出去。 */
+	PG_private,		/* If pagecache, has fs-private data */	/* 如果是页面缓存，包含了文件系统特定的数据。 */
+	PG_private_2,		/* If pagecache, has fs aux data */		/* 如果是页面缓存，包含了文件系统辅助数据。 */
+	PG_writeback,		/* Page is under writeback */		/* 页面正在被写回。 */
 #ifdef CONFIG_PAGEFLAGS_EXTENDED
-	PG_head,		/* A head page */
-	PG_tail,		/* A tail page */
+	PG_head,		/* A head page */		/* 一个头页面。 */
+	PG_tail,		/* A tail page */		/* 一个尾页面。 */
 #else
-	PG_compound,		/* A compound page */
+	PG_compound,		/* A compound page */		/* 一个复合页面。 */
 #endif
-	PG_swapcache,		/* Swap page: swp_entry_t in private */
-	PG_mappedtodisk,	/* Has blocks allocated on-disk */
-	PG_reclaim,		/* To be reclaimed asap */
-	PG_buddy,		/* Page is free, on buddy lists */
-	PG_swapbacked,		/* Page is backed by RAM/swap */
-	PG_unevictable,		/* Page is "unevictable"  */
+	PG_swapcache,		/* Swap page: swp_entry_t in private */		/* 交换页面：private中有swp_entry_t。 */
+	PG_mappedtodisk,	/* Has blocks allocated on-disk */			/* 在磁盘上分配了块。 */
+	PG_reclaim,		/* To be reclaimed asap */									/* 尽快回收。 */
+	PG_buddy,		/* Page is free, on buddy lists */						/* 页面是空闲的，在伙伴系统中。 */
+	PG_swapbacked,		/* Page is backed by RAM/swap */				/* 页面被RAM/swap支持。 */
+	PG_unevictable,		/* Page is "unevictable"  */						/* 页面是"不可回收的"。 */
 #ifdef CONFIG_MMU
-	PG_mlocked,		/* Page is vma mlocked */
+	PG_mlocked,		/* Page is vma mlocked */			/* 页面被vma锁定。 */
 #endif
 #ifdef CONFIG_ARCH_USES_PG_UNCACHED
-	PG_uncached,		/* Page has been mapped as uncached */
+	PG_uncached,		/* Page has been mapped as uncached */		/* 页面被映射为未缓存。 */
 #endif
 #ifdef CONFIG_MEMORY_FAILURE
-	PG_hwpoison,		/* hardware poisoned page. Don't touch */
+	PG_hwpoison,		/* hardware poisoned page. Don't touch */		/* 硬件损坏的页面。不要触碰。 */
 #endif
-	__NR_PAGEFLAGS,
+	__NR_PAGEFLAGS,		/* 页面标志的数量。 */
 
 	/* Filesystems */
-	PG_checked = PG_owner_priv_1,
+	PG_checked = PG_owner_priv_1,		/* 页面已检查。 */
 
 	/* Two page bits are conscripted by FS-Cache to maintain local caching
 	 * state.  These bits are set on pages belonging to the netfs's inodes
 	 * when those inodes are being locally cached.
 	 */
-	PG_fscache = PG_private_2,	/* page backed by cache */
+	/* 通过FS-Cache来维护本地缓存状态，文件系统缓存利用了两个页面位。这些位在正在被本地缓存的网络文件系统的inodes的页面上被设置。 */
+	PG_fscache = PG_private_2,	/* page backed by cache */		/* 页面被缓存支持。 */
 
 	/* XEN */
-	PG_pinned = PG_owner_priv_1,
-	PG_savepinned = PG_dirty,
+	PG_pinned = PG_owner_priv_1,		/* 页面被固定。 */
+	PG_savepinned = PG_dirty,				/* 保存固定的页面。 */
 
 	/* SLOB */
-	PG_slob_free = PG_private,
+	PG_slob_free = PG_private,			/* SLOB分配器中的空闲页面。 */
 
 	/* SLUB */
-	PG_slub_frozen = PG_active,
-	PG_slub_debug = PG_error,
+	PG_slub_frozen = PG_active,			/* SLUB分配器中的冻结页面。 */
+	PG_slub_debug = PG_error,				/* SLUB调试。 */
 };
 
 #ifndef __GENERATING_BOUNDS_H

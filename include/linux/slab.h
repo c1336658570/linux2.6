@@ -98,12 +98,27 @@
 void __init kmem_cache_init(void);
 int slab_is_available(void);
 
+// 函数用于创建一个新的slab缓存（高速缓存）。第一个参数是字符串，存放高速缓存的名字，第二个参数是高速缓存中每个元素的大小，
+// 第三个参数是slab内第一个对象的偏移，用来确保在页内进行特定的对齐。通常0就可以满足，也就是标准对齐。
+// flags参数是可选的设置项，用来控制高速缓存的行为。可以为0,表示没有特殊行为，或者与以下标志进行或运算，在slab.h中存在定义
+// SLAB_HWCACHE_ALIGN
+// SLAB_POISON
+// SLAB_RED_ZONE
+// SLAB_PANIC
+// SLAB_CACHE_DMA
+// 最后一个参数ctor是高速缓存的构造函数。只有在新的页主加到高速缓存，构造函数才被调用。实际上Linux内核的高速缓存不适用构造函数，赋值为NULL即可。
+// 函数成功时返回一个指向所创建的高速缓存的指针，否则返回NULL。该函数可能睡眠，不应在中断上下文调用。
 struct kmem_cache *kmem_cache_create(const char *, size_t, size_t,
 			unsigned long,
 			void (*)(void *));
+// 撤销一个给定高速缓存。该函数不能在中断中调用，因为可能睡眠。该函数调用需要两个条件：
+// 1.高速缓存中所有slab都为空。
+// 2.在调用kmem_cache_destroy()过程中（后）不再访问这个高速缓存。
+// 成功返回0,否则返回非0。
 void kmem_cache_destroy(struct kmem_cache *);
 int kmem_cache_shrink(struct kmem_cache *);
-void kmem_cache_free(struct kmem_cache *, void *);
+// 释放一个对象，并把它返回给原先的slab，这样就能把cachep中的对象objp标记为空闲
+void kmem_cache_free(struct kmem_cache *, void *objp);
 unsigned int kmem_cache_size(struct kmem_cache *);
 const char *kmem_cache_name(struct kmem_cache *);
 int kern_ptr_validate(const void *ptr, unsigned long size);
@@ -141,6 +156,9 @@ int kmem_ptr_validate(struct kmem_cache *cachep, const void *ptr);
  */
 void * __must_check __krealloc(const void *, size_t, gfp_t);
 void * __must_check krealloc(const void *, size_t, gfp_t);
+// 获得以字节为单位的一块内核内存。返回一个指向内存块的指针，内存块至少有size大小。所分配的内存区在物理上是连续的。出错返回NULL。
+// static __always_inline void *kmalloc(size_t size, gfp_t flags)
+// 释放kmalloc分配的内存，kfree(NULL)是安全的
 void kfree(const void *);
 void kzfree(const void *);
 size_t ksize(const void *);
@@ -251,6 +269,8 @@ static inline void *__kmalloc_node(size_t size, gfp_t flags, int node)
 	return __kmalloc(size, flags);
 }
 
+// 创建高速缓存之后，通过如下函数获取对象。该函数从给定的高速缓存中返回一个指向对象的指针。如果高速缓存的所有slab中
+// 都没有空闲对象，那么slab曾必须通过kmem_getpages()获取新的页，gfp_t类型的参数传递给页面分配函数。应该是GFP_KERNEL或GFP_ATOMIC。
 void *kmem_cache_alloc(struct kmem_cache *, gfp_t);
 
 static inline void *kmem_cache_alloc_node(struct kmem_cache *cachep,

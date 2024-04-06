@@ -53,6 +53,7 @@ extern unsigned long __per_cpu_offset[NR_CPUS];
  * established ways to produce a usable pointer from the percpu variable
  * offset.
  */
+// 用来获取其他CPU上的数据,per_cpu(name, cpu)
 #define per_cpu(var, cpu) \
 	(*SHIFT_PERCPU_PTR(&(var), per_cpu_offset(cpu)))
 #define __get_cpu_var(var) \
@@ -70,6 +71,7 @@ extern void setup_per_cpu_areas(void);
 
 #else /* ! SMP */
 
+// 用来获取其他CPU上的数据,per_cpu(name, cpu)
 #define per_cpu(var, cpu)			(*((void)(cpu), &(var)))
 #define __get_cpu_var(var)			(var)
 #define __raw_get_cpu_var(var)			(var)

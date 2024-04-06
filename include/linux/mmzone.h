@@ -279,9 +279,11 @@ struct zone_reclaim_stat {
 
 struct zone {
 	/* Fields commonly accessed by the page allocator */
+	 /* 页分配器常访问的字段 */
 
 	/* zone watermarks, access with *_wmark_pages(zone) macros */
-	unsigned long watermark[NR_WMARK];
+	/* 区域水位线，通过 *_wmark_pages(zone) 宏访问 */
+	unsigned long watermark[NR_WMARK];	// 数组持有该区的最小值、最低和最高水位值。内核使用水位为每个内存区设置合适的内存消耗基准。该水位随空闲内存的多少而变化。
 
 	/*
 	 * We don't know if the memory that we're going to allocate will be freeable
@@ -291,52 +293,72 @@ struct zone {
 	 * on the higher zones). This array is recalculated at runtime if the
 	 * sysctl_lowmem_reserve_ratio sysctl changes.
 	 */
+	/*
+	 * 我们不知道我们即将分配的内存是否可以被释放
+	 * 或者它是否最终会被释放，因此为了避免完全浪费几GB的RAM，
+	 * 我们必须保留一些较低区域的内存（否则我们冒着在低区域上运行OOM的风险
+	 * 尽管在高区域上有大量可释放的RAM）。这个数组在运行时会被重新计算，
+	 * 如果 sysctl_lowmem_reserve_ratio sysctl 发生变化。
+	 */
 	unsigned long		lowmem_reserve[MAX_NR_ZONES];
 
 #ifdef CONFIG_NUMA
-	int node;
+	int node;		// NUMA 节点标识符，表示该区域属于哪个NUMA节点。
 	/*
 	 * zone reclaim becomes active if more unmapped pages exist.
 	 */
-	unsigned long		min_unmapped_pages;
-	unsigned long		min_slab_pages;
+	/*
+     * 区域回收在存在更多未映射页面时变得活跃。
+     */
+	unsigned long		min_unmapped_pages;	// 触发区域回收的未映射页面的最小数量。
+	unsigned long		min_slab_pages;			// 触发区域回收的 slab 页面的最小数量。
 #endif
-	struct per_cpu_pageset __percpu *pageset;
+	struct per_cpu_pageset __percpu *pageset;	// 每个 CPU 的页面集，用于管理每个处理器的本地页面缓存。
 	/*
 	 * free areas of different sizes
 	 */
-	spinlock_t		lock;
-	int                     all_unreclaimable; /* All pages pinned */
+	/*
+   * 不同大小的自由区域
+   */
+	spinlock_t		lock;		// 自旋锁，防止该结构被并发访问，这个域只保护结构，而不保护驻留在该区中的所有页
+	int                     all_unreclaimable; /* All pages pinned */	/* 所有页面都被固定 */
 #ifdef CONFIG_MEMORY_HOTPLUG
 	/* see spanned/present_pages for more description */
-	seqlock_t		span_seqlock;
+	/* 有关更多描述，请参见 spanned/present_pages */
+	seqlock_t		span_seqlock;	// 序列锁，用于保护 spanned_pages 和 present_pages 字段。
 #endif
-	struct free_area	free_area[MAX_ORDER];
+	struct free_area	free_area[MAX_ORDER];	// 管理空闲页面的数组，每个元素对应一个不同大小的页面块列表。
 
 #ifndef CONFIG_SPARSEMEM
 	/*
 	 * Flags for a pageblock_nr_pages block. See pageblock-flags.h.
 	 * In SPARSEMEM, this map is stored in struct mem_section
 	 */
-	unsigned long		*pageblock_flags;
+	/*
+   * 一个 pageblock_nr_pages 块的标志。见 pageblock-flags.h。
+   * 在 SPARSEMEM 中，此映射存储在 struct mem_section 中
+   */
+	unsigned long		*pageblock_flags;	// 页面块标志，用于管理大块内存。
 #endif /* CONFIG_SPARSEMEM */
 
 
 	ZONE_PADDING(_pad1_)
 
 	/* Fields commonly accessed by the page reclaim scanner */
-	spinlock_t		lru_lock;	
+	/* 页回收扫描器常访问的字段 */
+	spinlock_t		lru_lock;			// 保护 LRU 列表的自旋锁。  
 	struct zone_lru {
-		struct list_head list;
-	} lru[NR_LRU_LISTS];
+		struct list_head list;		// LRU列表。
+	} lru[NR_LRU_LISTS];		 // 按照不同的用途（如活动文件、非活动文件等）组织的 LRU 列表数组。
 
-	struct zone_reclaim_stat reclaim_stat;
+	struct zone_reclaim_stat reclaim_stat;		// 区域回收统计数据。
 
-	unsigned long		pages_scanned;	   /* since last reclaim */
-	unsigned long		flags;		   /* zone flags, see below */
+	unsigned long		pages_scanned;	   /* since last reclaim */		/* 自上次回收以来扫描的页面 */
+	unsigned long		flags;		   /* zone flags, see below */		/* 区域标志，见下文 */
 
 	/* Zone statistics */
-	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
+	/* 区域统计信息 */
+	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];	// 区域内存统计数据，例如页面错误、分配次数等。
 
 	/*
 	 * prev_priority holds the scanning priority for this zone.  It is
@@ -351,17 +373,31 @@ struct zone {
 	 * Access to both this field is quite racy even on uniprocessor.  But
 	 * it is expected to average out OK.
 	 */
-	int prev_priority;
+	/*
+   * prev_priority 保存了该区域上次调用 try_to_free_pages() 或 
+   * balance_pgdat() 得到我们的回收目标时的扫描优先级。
+   *
+   * 我们使用 prev_priority 作为衡量页面回收压力的一个度量——它驱动交换决策：
+   * 是否可以换出映射页面。
+   *
+   * 即使在单处理器上，访问这个字段也相当有竞争。但是预期它会平均得很好。
+   */
+	int prev_priority;		// 代表了上次内存回收时的扫描优先级。
 
 	/*
 	 * The target ratio of ACTIVE_ANON to INACTIVE_ANON pages on
 	 * this zone's LRU.  Maintained by the pageout code.
 	 */
-	unsigned int inactive_ratio;
+	/*
+   * 该区域 LRU 上 ACTIVE_ANON 与 INACTIVE_ANON 页面的目标比例。
+   * 由页面交换出代码维护。
+   */
+	unsigned int inactive_ratio;		// 活跃与非活跃匿名页面的目标比例。
 
 
 	ZONE_PADDING(_pad2_)
 	/* Rarely used or read-mostly fields */
+	/* 很少使用或主要读取的字段 */
 
 	/*
 	 * wait_table		-- the array holding the hash table
@@ -387,16 +423,37 @@ struct zone {
 	 * primary users of these fields, and in mm/page_alloc.c
 	 * free_area_init_core() performs the initialization of them.
 	 */
-	wait_queue_head_t	* wait_table;
-	unsigned long		wait_table_hash_nr_entries;
-	unsigned long		wait_table_bits;
+	/*
+   * wait_table -- 持有哈希表数组的数组
+   * wait_table_hash_nr_entries -- 哈希表数组的大小
+   * wait_table_bits -- wait_table_size == (1 << wait_table_bits)
+   *
+   * 所有这些的目的是追踪等待页面变得可用的人，并在可能时使他们
+   * 再次可运行。问题是这会消耗很多空间，尤其是当很少有事情
+   * 在给定时间等待页面。因此，而不是使用每页 waitqueues，我们使用
+   * 一个 waitqueue 哈希表。
+   *
+   * 存桶原则是在冲突时睡在相同队列上，并在移除时唤醒该等待队列中的所有人。
+   * 当某物醒来时，它必须检查以确保它的页面真的可用，类似雷鸣群体效应。
+   * 冲突的成本很高，但鉴于表的预期负载，它们应该很少见，因为被节省的空间的好处
+   * 超过了冲突的成本。
+   *
+   * __wait_on_page_locked() 和 unlock_page() 在 mm/filemap.c 中是这些字段的主要
+   * 用户，而在 mm/page_alloc.c 中的 free_area_init_core() 执行它们的初始化。
+   */
+	wait_queue_head_t	* wait_table;		// 等待哈希表，用于管理等待特定页面的进程。
+	unsigned long		wait_table_hash_nr_entries;		// 等待表哈希表的入口数量。
+	unsigned long		wait_table_bits;	// 等待表位数，wait_table 的大小为 2 的 wait_table_bits 次幂。
 
 	/*
 	 * Discontig memory support fields.
 	 */
-	struct pglist_data	*zone_pgdat;
+	/*
+   * 非连续内存支持字段。
+   */
+	struct pglist_data	*zone_pgdat;		// 指向该区域所属的节点数据结构的指针。
 	/* zone_start_pfn == zone_start_paddr >> PAGE_SHIFT */
-	unsigned long		zone_start_pfn;
+	unsigned long		zone_start_pfn;			// 区域的起始页面帧号。
 
 	/*
 	 * zone_start_pfn, spanned_pages and present_pages are all
@@ -408,13 +465,23 @@ struct zone {
 	 * frequently read in proximity to zone->lock.  It's good to
 	 * give them a chance of being in the same cacheline.
 	 */
-	unsigned long		spanned_pages;	/* total size, including holes */
-	unsigned long		present_pages;	/* amount of memory (excluding holes) */
+	/*
+   * zone_start_pfn, spanned_pages 和 present_pages 都是
+   * 受 span_seqlock 保护的。它是一个 seqlock，因为它必须
+   * 在区域->lock之外被读取，且在主分配路径中被执行。但是，
+   * 写入相当不频繁。
+   *
+   * 声明这个锁是连同 zone->lock 一起的，因为它经常被接近
+   * zone->lock 的位置读取。给它们一个在同一高速缓存行的机会
+   * 是很好的。
+   */
+	unsigned long		spanned_pages;	/* total size, including holes */		// 总大小，包括空洞。
+	unsigned long		present_pages;	/* amount of memory (excluding holes) */	// 内存量（排除空洞）。
 
 	/*
 	 * rarely used fields:
 	 */
-	const char		*name;
+	const char		*name;	// name域是一个以NULL结束的字符串表示这个区的名字。
 } ____cacheline_internodealigned_in_smp;
 
 typedef enum {

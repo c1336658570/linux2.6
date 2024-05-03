@@ -34,7 +34,7 @@ struct vm_area_struct;
 
 // 区域修饰符，不存在__GFP_NORMAL，因为如果不指定任何标志，默认是从ZONE_NORMAL（优先）和ZONE_DMA分配内存
 
-// 从ZONE_DMA分配内存
+// 强制只从ZONE_DMA分配内存
 #define __GFP_DMA	((__force gfp_t)0x01u)
 // 从ZONE_HIGHMEM（优先）或ZONE_NORMAL分配
 #define __GFP_HIGHMEM	((__force gfp_t)0x02u)
@@ -78,6 +78,7 @@ struct vm_area_struct;
 // 分配器可以睡眠
 #define __GFP_WAIT	((__force gfp_t)0x10u)	/* Can wait and reschedule? */
 // 分配器可以访问紧急事件缓冲池
+/* 请求分配非常紧急的内存，注意与__GFP_HIGHMEM的区分，__GPF_HIGHMEM指从高端内存域分配内存 */
 #define __GFP_HIGH	((__force gfp_t)0x20u)	/* Should access emergency pools? */
 // 分配器可以启动磁盘IO
 #define __GFP_IO	((__force gfp_t)0x40u)	/* Can start physical IO? */
@@ -99,7 +100,7 @@ struct vm_area_struct;
 #define __GFP_ZERO	((__force gfp_t)0x8000u)/* Return zeroed page on success */
 /* 不使用紧急储备 */
 #define __GFP_NOMEMALLOC ((__force gfp_t)0x10000u) /* Don't use emergency reserves */
-/* 强制执行硬墙内存分配 */
+/* 只能在当前进程可运行的cpu关联的内存节点上分配内存，如果进程可在所有cpu上运行，该标志无意义 */
 #define __GFP_HARDWALL   ((__force gfp_t)0x20000u) /* Enforce hardwall cpuset memory allocs */
 /* 无后备策略，仅此节点 */
 #define __GFP_THISNODE	((__force gfp_t)0x40000u)/* No fallback, no policies */
@@ -390,6 +391,8 @@ extern struct page *alloc_page_vma(gfp_t gfp_mask,
 #define alloc_page(gfp_mask) alloc_pages(gfp_mask, 0)
 
 // 该函数与alloc_pages()作用相同，它直接返回请求的第一个页的逻辑地址，因为页是连续，其他页会紧随其后。
+// 不能给该函数和malloc指定ZONE_HIGHEM，因为这俩函数返回的是逻辑地址，而不是page结构，这俩函数分配的
+// 内存可能还没有映射到内核的虚拟地址空间。
 extern unsigned long __get_free_pages(gfp_t gfp_mask, unsigned int order);
 // 分配一个页，并且页的内容被置为0
 extern unsigned long get_zeroed_page(gfp_t gfp_mask);

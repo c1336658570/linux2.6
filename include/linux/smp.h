@@ -173,8 +173,25 @@ smp_call_function_any(const struct cpumask *mask, void (*func)(void *info),
 # define smp_processor_id() raw_smp_processor_id()
 #endif
 
+// 禁止抢占，并获取当前CPU id
 #define get_cpu()		({ preempt_disable(); smp_processor_id(); })
+// 开启抢占
 #define put_cpu()		preempt_enable()
+
+// 访问单CPU数据过程不能睡眠，如果睡眠，醒来可能已经在其他CPU上了
+
+/**
+ * 通过如下方式访问单CPU数据，老方式（新方式是，get_cpu_var(name)）
+ * unsigned long my_percpu[NR_CPUS]
+ * int cpu = get_cpu();
+ * my_percpu[cpu]++;
+ * put_CPU();
+ * 
+ * 内核抢占会导致两个问题，所以访问单CPU数据需要禁止内核抢占
+ * 1.当前代码被其他处理器抢占，并被重新调度到其他处理器，就会导致访问单CPU数据出错
+ * 2.另一个任务抢占了当前代码，可能并发访问
+*/
+
 
 /*
  * Callback to arch code if there's nosmp or maxcpus=0 on the

@@ -55,7 +55,9 @@ static inline unsigned int nr_free_highpages(void) { return 0; }
 #define totalhigh_pages 0UL
 
 #ifndef ARCH_HAS_KMAP
-//  映射一个给定的page结构到内核地址空间,这个函数在高端内存或低端内存上都能用.
+// 下面两个函数都是和永久映射相关的
+
+// 映射一个给定的page结构到内核地址空间,这个函数在高端内存或低端内存上都能用.
 // 如果page结构对应的是一个低端内存中的一页,函数只会单纯的返回虚拟地址.
 // 如果页位于高端内存,则会建立一个永久映射,再返回地址.该函数可以睡眠,只能用进程上下文中.
 static inline void *kmap(struct page *page)
@@ -80,7 +82,7 @@ static inline void *kmap_atomic(struct page *page, enum km_type idx)
 }
 #define kmap_atomic_prot(page, idx, prot)	kmap_atomic(page, idx)
 
-// 取消临时映射
+// 取消临时映射，不需要做人和事。下一个临时（原子）映射将自动覆盖掉前一个映射
 #define kunmap_atomic(addr, idx)	do { pagefault_enable(); } while (0)
 #define kmap_atomic_pfn(pfn, idx)	kmap_atomic(pfn_to_page(pfn), (idx))
 #define kmap_atomic_to_page(ptr)	virt_to_page(ptr)

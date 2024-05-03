@@ -17,11 +17,16 @@
  * The ones marked DEBUG are only valid if CONFIG_SLAB_DEBUG is set.
  */
 #define SLAB_DEBUG_FREE		0x00000100UL	/* DEBUG: Perform (expensive) checks on free */
+// 导致slab层在已分配的内存周围插入“红色警戒区”以探测缓冲越界
 #define SLAB_RED_ZONE		0x00000400UL	/* DEBUG: Red zone objs in a cache */
+// 使slab层用已知的值（a5a5a5a5）填充slab。这就是所谓的中毒，有利于对未初始化内存的访问
 #define SLAB_POISON		0x00000800UL	/* DEBUG: Poison objects */
+// 所有对象按高速缓存行对齐。
 #define SLAB_HWCACHE_ALIGN	0x00002000UL	/* Align objs on cache lines */
+// slab层使用可以执行DMA的内存给每个slab分配空间。
 #define SLAB_CACHE_DMA		0x00004000UL	/* Use GFP_DMA memory */
 #define SLAB_STORE_USER		0x00010000UL	/* DEBUG: Store the last owner for bug hunting */
+// 当分配失败时提醒slab层
 #define SLAB_PANIC		0x00040000UL	/* Panic if kmem_cache_create() fails */
 /*
  * SLAB_DESTROY_BY_RCU - **WARNING** READ THIS!
@@ -98,6 +103,25 @@
 void __init kmem_cache_init(void);
 int slab_is_available(void);
 
+/**
+ * 
+ *
+ * Interface to system's page allocator. No need to hold the cache-lock.
+ * 系统页面分配器的接口。无需持有缓存锁。
+ * 
+ * If we requested dmaable memory, we will get it. Even if we
+ * did not request dmaable memory, we might get it, but that
+ * would be relatively rare and ignorable.
+ * 如果我们请求了可DMA的内存，我们将得到它。
+ * 即使我们没有请求DMA内存，我们也可能得到它，但这是相对罕见且可以忽略的。
+
+// 下面函数被slab层调用。
+// 用于创建新的slab对象，一个高速缓存有多个slab，当高速缓存中slab对象用完了就需要创建新的slab对象
+// 第一个参数指向需要很多页的特定高速缓存。第二个参数是内存分配标志。
+// 当nodeid非负时，分配器尝试从相同的内存节点给发出的请求进行分配。
+static void *kmem_getpages(struct kmem_cache *cachep, gfp_t flags, int nodeid)
+*/
+
 // 函数用于创建一个新的slab缓存（高速缓存）。第一个参数是字符串，存放高速缓存的名字，第二个参数是高速缓存中每个元素的大小，
 // 第三个参数是slab内第一个对象的偏移，用来确保在页内进行特定的对齐。通常0就可以满足，也就是标准对齐。
 // flags参数是可选的设置项，用来控制高速缓存的行为。可以为0,表示没有特殊行为，或者与以下标志进行或运算，在slab.h中存在定义
@@ -117,7 +141,7 @@ struct kmem_cache *kmem_cache_create(const char *, size_t, size_t,
 // 成功返回0,否则返回非0。
 void kmem_cache_destroy(struct kmem_cache *);
 int kmem_cache_shrink(struct kmem_cache *);
-// 释放一个对象，并把它返回给原先的slab，这样就能把cachep中的对象objp标记为空闲
+// 释放一个对象，并把它返回给原先的slab，这样就能把cachep中的对象objp标记为空闲。和kmem_cache_alloc相反。
 void kmem_cache_free(struct kmem_cache *, void *objp);
 unsigned int kmem_cache_size(struct kmem_cache *);
 const char *kmem_cache_name(struct kmem_cache *);
@@ -270,7 +294,7 @@ static inline void *__kmalloc_node(size_t size, gfp_t flags, int node)
 }
 
 // 创建高速缓存之后，通过如下函数获取对象。该函数从给定的高速缓存中返回一个指向对象的指针。如果高速缓存的所有slab中
-// 都没有空闲对象，那么slab曾必须通过kmem_getpages()获取新的页，gfp_t类型的参数传递给页面分配函数。应该是GFP_KERNEL或GFP_ATOMIC。
+// 都没有空闲对象，那么slab层必须通过kmem_getpages()获取新的页，gfp_t类型的参数传递给页面分配函数。应该是GFP_KERNEL或GFP_ATOMIC。
 void *kmem_cache_alloc(struct kmem_cache *, gfp_t);
 
 static inline void *kmem_cache_alloc_node(struct kmem_cache *cachep,

@@ -23,10 +23,25 @@
 	 PERCPU_MODULE_RESERVE)
 #endif
 
+// 访问单CPU数据过程不能睡眠，如果睡眠，醒来可能已经在其他CPU上了
+
+/**
+ * 通过如下方式访问单CPU数据，老方式（新方式是，get_cpu_var(name)）
+ * unsigned long my_percpu[NR_CPUS]
+ * int cpu = get_cpu();
+ * my_percpu[cpu]++;
+ * put_CPU();
+ * 
+ * 内核抢占会导致两个问题，所以访问单CPU数据需要禁止内核抢占
+ * 1.当前代码被其他处理器抢占，并被重新调度到其他处理器，就会导致访问单CPU数据出错
+ * 2.另一个任务抢占了当前代码，可能并发访问
+*/
+
 /*
  * Must be an lvalue. Since @var must be a simple identifier,
  * we force a syntax error here if it isn't.
  */
+// 静态定义的单CPU在内核模块中不能被访问，内核模块要访问或者定义单CPU数据需要动态定义。alloc_percpu(type)
 // 返回当前处理器上的指定变量,同时禁止内核抢占.
 #define get_cpu_var(var) (*({				\
 	preempt_disable();				\
@@ -162,18 +177,32 @@ static inline void *pcpu_lpage_remapped(void *kaddr)
 }
 
 #endif /* CONFIG_SMP */
+// 访问单CPU数据过程不能睡眠，如果睡眠，醒来可能已经在其他CPU上了
 
+// 运行时的每个CPU数据
 // 第一个参数时要分配的实际字节数,第二个参数是分配时按照多少字节对齐
 extern void __percpu *__alloc_percpu(size_t size, size_t align);
 // 释放所有处理器上指定的每个CPU数据
 extern void free_percpu(void __percpu *__pdata);
 extern phys_addr_t per_cpu_ptr_to_phys(void *addr);
 
-// 运行时给系统每个处理器分配一个指定类型对象的实例,按照单字节对齐——按照给定类型的自然边界对齐。
+// 运行时给系统每个处理器分配一个指定类型对象的实例,按照单字节对齐——即给定类型的自然边界对齐，返回一个指针。
 // __alignof__是gcc的一个功能，它会返回指定类型或lvalue所需的（或建议的，有些古怪的体系结构并没有字节对齐的要求）对齐的字节数。
 // __alignof__(unsigned long)在x86体系中将返回4
 #define alloc_percpu(type)	\
 	(typeof(type) __percpu *)__alloc_percpu(sizeof(type), __alignof__(type))
+/**
+ * 使用示例：
+ * void *percpu_ptr;
+ * unsigned long *foo;
+ * percpu_ptr = alloc_percpu(unsigned long);
+ * if (!ptr) {
+ * 	// 内存分配错误
+ * }
+ * foo = get_cpu_var(percpu_ptr);
+ * // 操作foo...
+ * put_cpu_var(percpu_ptr);
+*/
 
 /*
  * Optional methods for optimized non-lvalue per-cpu variable access.

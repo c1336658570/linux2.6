@@ -481,6 +481,7 @@ struct zone {
 	/*
 	 * rarely used fields:
 	 */
+	// 该管理区的名字可以是DMA,Normal和HighMem
 	const char		*name;	// name域是一个以NULL结束的字符串表示这个区的名字。
 } ____cacheline_internodealigned_in_smp;
 

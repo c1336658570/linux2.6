@@ -228,6 +228,9 @@ typedef unsigned int kmem_bufctl_t;
  * 或者从通用缓存中分配。
  * Slabs 被链入三个列表：完全使用的、部分使用的、完全空闲的 slabs。
  */
+// slab层把不同对象划分为高速缓存组，每个高速缓存组都存放不同类型的对象。每种对象对应一个高速缓存。
+// 一个高速缓存有多个slab，然后每个slab内又有多个该对象。
+// slab描述符要么在自身开始的地方，要么另行分配。
 struct slab {
 	struct list_head list;		// 满、部分满或空链表
 	unsigned long colouroff;	// slab着色的偏移量
@@ -1612,12 +1615,17 @@ __initcall(cpucache_init);
 
 /*
  * Interface to system's page allocator. No need to hold the cache-lock.
- *
+ * 系统页面分配器的接口。无需持有缓存锁。
+ * 
  * If we requested dmaable memory, we will get it. Even if we
  * did not request dmaable memory, we might get it, but that
  * would be relatively rare and ignorable.
+ * 如果我们请求了可DMA的内存，我们将得到它。
+ * 即使我们没有请求DMA内存，我们也可能得到它，但这是相对罕见且可以忽略的。
  */
 // 用于创建新的slab对象，一个高速缓存有多个slab，当高速缓存中slab对象用完了就需要创建新的slab对象
+// 第一个参数指向需要很多页的特定高速缓存。第二个参数是内存分配标志。
+// 当nodeid非负时，分配器尝试从相同的内存节点给发出的请求进行分配。
 static void *kmem_getpages(struct kmem_cache *cachep, gfp_t flags, int nodeid)
 {
 	struct page *page;
@@ -1629,76 +1637,82 @@ static void *kmem_getpages(struct kmem_cache *cachep, gfp_t flags, int nodeid)
 	 * Nommu uses slab's for process anonymous memory allocations, and thus
 	 * requires __GFP_COMP to properly refcount higher order allocations
 	 */
+	/*
+	 * Nommu 使用slab来进行进程匿名内存分配，因此需要 __GFP_COMP 来正确地引用计算更高阶的分配。
+	 */
 	flags |= __GFP_COMP;
 #endif
 
-	flags |= cachep->gfpflags;
+	flags |= cachep->gfpflags;	// 设置标志位
 	if (cachep->flags & SLAB_RECLAIM_ACCOUNT)
-		flags |= __GFP_RECLAIMABLE;
+		flags |= __GFP_RECLAIMABLE;		// 如果标志位指示需要回收，则设置相应标志
 
-	// 分配内存，大小为cachep->gfporder
+	// 分配内存，大小为2的幂次方，存放在cachep->gfporder
 	page = alloc_pages_exact_node(nodeid, flags | __GFP_NOTRACK, cachep->gfporder);
 	if (!page)
 		return NULL;
 
-	nr_pages = (1 << cachep->gfporder);
+	nr_pages = (1 << cachep->gfporder);	// 计算页面数量
 	if (cachep->flags & SLAB_RECLAIM_ACCOUNT)
 		add_zone_page_state(page_zone(page),
-			NR_SLAB_RECLAIMABLE, nr_pages);
+			NR_SLAB_RECLAIMABLE, nr_pages);		// 更新页面状态
 	else
 		add_zone_page_state(page_zone(page),
-			NR_SLAB_UNRECLAIMABLE, nr_pages);
+			NR_SLAB_UNRECLAIMABLE, nr_pages);	// 更新页面状态
 	for (i = 0; i < nr_pages; i++)
-		__SetPageSlab(page + i);
+		__SetPageSlab(page + i);		// 设置页面为 slab
 
 	if (kmemcheck_enabled && !(cachep->flags & SLAB_NOTRACK)) {
 		kmemcheck_alloc_shadow(page, cachep->gfporder, flags, nodeid);
 
 		if (cachep->ctor)
-			kmemcheck_mark_uninitialized_pages(page, nr_pages);
+			kmemcheck_mark_uninitialized_pages(page, nr_pages);	// 标记未初始化的页面
 		else
-			kmemcheck_mark_unallocated_pages(page, nr_pages);
+			kmemcheck_mark_unallocated_pages(page, nr_pages);	// 标记未分配的页面
 	}
 
-	return page_address(page);
+	return page_address(page);	// 返回页面地址
 }
 
 /*
  * Interface to system's page release.
  */
-// 回收
+/*
+ * 系统页面释放的接口。
+ */
+// 释放内存
 static void kmem_freepages(struct kmem_cache *cachep, void *addr)
 {
-	unsigned long i = (1 << cachep->gfporder);
-	struct page *page = virt_to_page(addr);
-	const unsigned long nr_freed = i;
+	unsigned long i = (1 << cachep->gfporder);	// 页面数量
+	struct page *page = virt_to_page(addr);	// 获取页面结构指针
+	const unsigned long nr_freed = i;		// 释放的页面数量
 
 	kmemcheck_free_shadow(page, cachep->gfporder);
 
 	if (cachep->flags & SLAB_RECLAIM_ACCOUNT)
 		sub_zone_page_state(page_zone(page),
-				NR_SLAB_RECLAIMABLE, nr_freed);
+				NR_SLAB_RECLAIMABLE, nr_freed);	// 更新页面状态
 	else
 		sub_zone_page_state(page_zone(page),
-				NR_SLAB_UNRECLAIMABLE, nr_freed);
+				NR_SLAB_UNRECLAIMABLE, nr_freed);	// 更新页面状态
 	while (i--) {
-		BUG_ON(!PageSlab(page));
-		__ClearPageSlab(page);
-		page++;
+		BUG_ON(!PageSlab(page));	// 断言页面为 slab
+		__ClearPageSlab(page);		// 清除页面的 slab 标志
+		page++;	// 移动到下一个页面
 	}
 	if (current->reclaim_state)
-		current->reclaim_state->reclaimed_slab += nr_freed;
-	free_pages((unsigned long)addr, cachep->gfporder);
+		current->reclaim_state->reclaimed_slab += nr_freed;	// 更新当前进程的回收状态
+	free_pages((unsigned long)addr, cachep->gfporder);	// 释放页面
 }
 
 static void kmem_rcu_free(struct rcu_head *head)
 {
-	struct slab_rcu *slab_rcu = (struct slab_rcu *)head;
-	struct kmem_cache *cachep = slab_rcu->cachep;
+	struct slab_rcu *slab_rcu = (struct slab_rcu *)head;	// RCU slab 结构指针
+	struct kmem_cache *cachep = slab_rcu->cachep;				// kmem 缓存指针
 
-	kmem_freepages(cachep, slab_rcu->addr);
+	kmem_freepages(cachep, slab_rcu->addr);		// 调用页面释放函数释放页面
 	if (OFF_SLAB(cachep))
-		kmem_cache_free(cachep->slabp_cache, slab_rcu);
+		kmem_cache_free(cachep->slabp_cache, slab_rcu);	// 如果为 OFF_SLAB，则释放缓存
 }
 
 #if DEBUG
@@ -2141,8 +2155,7 @@ static int __init_refok setup_cpu_cache(struct kmem_cache *cachep, gfp_t gfp)
 // SLAB_CACHE_DMA
 // 最后一个参数ctor是高速缓存的构造函数。只有在新的页主加到高速缓存，构造函数才被调用。实际上Linux内核的高速缓存不适用构造函数，赋值为NULL即可。
 // 函数成功时返回一个指向所创建的高速缓存的指针，否则返回NULL。该函数可能睡眠，不应在中断上下文调用。
-struct kmem_cache *
-kmem_cache_create (const char *name, size_t size, size_t align,
+struct kmem_cache *kmem_cache_create (const char *name, size_t size, size_t align,
 	unsigned long flags, void (*ctor)(void *))
 {
 	size_t left_over, slab_size, ralign;
@@ -3620,7 +3633,7 @@ static inline void __cache_free(struct kmem_cache *cachep, void *objp)
  * if the cache has no available objects.
  */
 // 创建高速缓存之后，通过如下函数获取对象。该函数从给定的高速缓存中返回一个指向对象的指针。如果高速缓存的所有slab中
-// 都没有空闲对象，那么slab曾必须通过kmem_getpages()获取新的页，gfp_t类型的参数传递给页面分配函数。应该是GFP_KERNEL或GFP_ATOMIC。
+// 都没有空闲对象，那么slab层必须通过kmem_getpages()获取新的页，gfp_t类型的参数传递给页面分配函数。应该是GFP_KERNEL或GFP_ATOMIC。
 void *kmem_cache_alloc(struct kmem_cache *cachep, gfp_t flags)
 {
 	void *ret = __cache_alloc(cachep, flags, __builtin_return_address(0));

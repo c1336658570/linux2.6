@@ -248,7 +248,7 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 
 	ti = alloc_thread_info(tsk);
 	if (!ti) {
-		// 释放进程描述符,并返回给task_struct_cachep slab高速缓存,free_task_struct宏是kmem_cache_free(task_struct_cachep, (tsk))的封装
+		// 释放进程描述符,并返回给task_struct_cachep的slab高速缓存,free_task_struct宏是kmem_cache_free(task_struct_cachep, (tsk))的封装
 		free_task_struct(tsk);
 		return NULL;
 	}
@@ -1481,7 +1481,8 @@ static void sighand_ctor(void *data)
 }
 
 void __init proc_caches_init(void)
-{
+{	
+	// 创建高速缓存（slab），然后通过kmem_cache_alloc从高速缓存中分配
 	sighand_cachep = kmem_cache_create("sighand_cache",
 			sizeof(struct sighand_struct), 0,
 			SLAB_HWCACHE_ALIGN|SLAB_PANIC|SLAB_DESTROY_BY_RCU|

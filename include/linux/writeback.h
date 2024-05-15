@@ -10,7 +10,9 @@
 struct backing_dev_info;
 
 extern spinlock_t inode_lock;
+// 当前正在使用的inode链表，i_count > 0且 i_nlink > 0
 extern struct list_head inode_in_use;
+// 目前未被使用的inode节点链表，即尚在内存中没有销毁，但是没有进程使用，i_count为0。
 extern struct list_head inode_unused;
 
 /*

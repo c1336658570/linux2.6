@@ -721,15 +721,23 @@ static inline int mapping_writably_mapped(struct address_space *mapping)
 struct posix_acl;
 #define ACL_NOT_CACHED ((void *)(-1))
 
-// 索引节点对象，该对性爱嗯包含了内核在操作文件或目录时需要的全部信息。
+// 索引节点对象，该对象包含了内核在操作文件或目录时需要的全部信息。
 struct inode {
+	// 放在inode_unused或inode_in_use中
+	// 指向哈希链表指针，用于查询，已经inode号码和对应超级块的时候，通过哈希表来快速查询地址。
+	// 为了加快查找效率，将正在使用的和脏的inode放入一个哈希表中，
+	// 但是不同的inode的哈希值可能相等，hash值相等的inode通过过i_hash成员连接。
 	struct hlist_node	i_hash;		/* 散列表 */
 	struct list_head	i_list;		/* backing dev IO list */	/* 索引节点链表 */
 	struct list_head	i_sb_list;	/* 超级块链表 */
 	// 一个给定的inode可能由多个链接（如/a/b/c，就存在/和目录a和目录b），所以就可能有多个目录项对象，因此用一个链表连接它们
+	// 指向目录项链表指针，因为一个inode可以对应多个dentry(a/b和b/b是同一个硬链接的情况)，
+	// 因此用一个链表将于本inode关联的目录项都连在一起。
 	struct list_head	i_dentry;		/* 目录项链表 */
 	unsigned long		i_ino;				/* 节点号 */
+	// 访问该inode结构体对象的进程数
 	atomic_t		i_count;					/* 引用计数 */
+	// 硬链接计数，等于0时将文件从磁盘移除
 	unsigned int		i_nlink;			/* 硬链接数 */
 	uid_t			i_uid;							/* 使用者id */
 	gid_t			i_gid;							/* 使用组的id */
@@ -750,8 +758,11 @@ struct inode {
 	struct mutex		i_mutex;					/* 索引节点自旋锁 */
 	struct rw_semaphore	i_alloc_sem;	/* 嵌入i_sem内部 */
 	// 描述了VFS用以操作索引节点对象的所有方法，这些方法由文件系统实现。调用方式如下i->i_op->truncate(i)
+	// 索引节点操作函数指针，指向了inode_operation结构体，提供与inode相关的操作
 	const struct inode_operations	*i_op;	/* 索引节点操作表 */
+	// 指向file_operations结构提供文件操作，在file结构体中也有指向file_operations结构的指针。
 	const struct file_operations	*i_fop;	/* former ->i_op->default_file_ops */	/*缺省的索引节点操作*/
+	// inode所属文件系统的超级块指针
 	struct super_block	*i_sb;				/* 相关的超级块 */
 	struct file_lock	*i_flock;				/* 文件锁链表 */
 	struct address_space	*i_mapping;	/* 相关的地址映射 */
@@ -761,15 +772,18 @@ struct inode {
 #endif
 	struct list_head	i_devices;					/* 块设备链表 */
 	union {
-		struct pipe_inode_info	*i_pipe;		/* 管道信息 */	// i_pipe指向一个代表用名管道的数据结构
-		struct block_device	*i_bdev;				/* 块设备驱动 */	// i_bdev指向块设备结构体
+		// 下面三种结构互斥，所以放在一个union中。inode可以表示下面三者之一或三者都不是。
+		struct pipe_inode_info	*i_pipe;		/* 管道信息 */			// i_pipe指向一个代表用名管道的数据结构
+		struct block_device	*i_bdev;				/* 块设备驱动 */		// i_bdev指向块设备结构体
 		struct cdev		*i_cdev;							/* 字符设备驱动 */	// i_cdev指向字符设备结构体
 	};
 
-	__u32			i_generation;
+	__u32			i_generation;		// 生成号，用于文件系统的唯一性验证。
 
 #ifdef CONFIG_FSNOTIFY
+	// 事件掩码，指定inode关心的事件。
 	__u32			i_fsnotify_mask; /* all events this inode cares about */
+	// fsnotify标记项链表。
 	struct hlist_head	i_fsnotify_mark_entries; /* fsnotify mark entries */
 #endif
 
@@ -788,7 +802,9 @@ struct inode {
 	void			*i_security;			/* 安全模块 */
 #endif
 #ifdef CONFIG_FS_POSIX_ACL
+	// POSIX访问控制列表。
 	struct posix_acl	*i_acl;
+	// 默认POSIX访问控制列表。
 	struct posix_acl	*i_default_acl;
 #endif
 	void			*i_private; /* fs or device private pointer */	/* fs私有指针 */
@@ -921,28 +937,39 @@ struct file {
 	 * fu_list becomes invalid after file_free is called and queued via
 	 * fu_rcuhead for RCU freeing
 	 */
+	// 系统级的打开文件表是由所有内核创建的FILE对象通过其fu_list成员连接成的双向循环链表。
+	// 即系统级打开文件表中的表项就是FILE对象，FILE对象中有目录项成员dentry，
+	// dentry中有指向inode索引节点的指针，即通过打开文件表中的表项，就能找到对应的inode。
 	union {
-		struct list_head	fu_list;		// 文件对象链表
-		struct rcu_head 	fu_rcuhead;	// 释放之后的RCU链表
+		struct list_head	fu_list;		// 文件对象链表，用于将所有的打开的FILE文件连接起来形成打开文件表
+		struct rcu_head 	fu_rcuhead;	// RCU(Read-Copy Update)是Linux 2.6内核中新的锁机制
 	} f_u;
-	struct path		f_path;						// 包含目录项
-#define f_dentry	f_path.dentry
-#define f_vfsmnt	f_path.mnt
-	const struct file_operations	*f_op;	// 文件操作表
+	struct path		f_path;						// 包含dentry和mnt两个成员，用于确定文件路径
+#define f_dentry	f_path.dentry		// f_path的成员之一，当前文件的dentry结构
+#define f_vfsmnt	f_path.mnt			// 表示当前文件所在文件系统的挂载根目录
+	const struct file_operations	*f_op;	// 与该文件相关联的操作函数
 	spinlock_t		f_lock;  /* f_ep_links, f_flags, no IRQ */	// 单个文件结构锁
+	// 文件的引用计数(有多少进程打开该文件)
 	atomic_long_t		f_count;		// 文件对象的使用计数
+	// 对应于open时指定的flag
 	unsigned int 		f_flags;		// 打开文件时所指定的标志
+	// 读写模式：open的mod_t mode参数
 	fmode_t			f_mode;					// 文件的访问模式
+	// 当前文件指针位置
 	loff_t			f_pos;					// 文件当前的位移量(文件指针)
+	// 该结构的作用是通过信号进行I/O时间通知的数据。
 	struct fown_struct	f_owner;		// 拥有者通过信号进行异步I/O数据传送
 	const struct cred	*f_cred;			// 文件的信任状
+	// 在linux/include/linux/fs.h中定义，文件预读相关
 	struct file_ra_state	f_ra;			// 预读状态
 
+	// 记录文件的版本号，每次使用之后递增
 	u64			f_version;		// 版本号
 #ifdef CONFIG_SECURITY
 	void			*f_security;		// 安全模块
 #endif
 	/* needed for tty driver, and maybe others */
+	/*tty 驱动程序需要，也许其他驱动程序需要*/
 	void			*private_data;		// tty设备驱动的钩子
 
 #ifdef CONFIG_EPOLL
@@ -1317,20 +1344,25 @@ extern int send_sigurg(struct fown_struct *fown);
 #define UMOUNT_NOFOLLOW	0x00000008	/* Don't follow symlink on umount */
 #define UMOUNT_UNUSED	0x80000000	/* Flag guaranteed to be unused */
 
-extern struct list_head super_blocks;
+extern struct list_head super_blocks;		// 链表，用来将所有的super_block（超级块）连接起来
 extern spinlock_t sb_lock;
 
 #define sb_entry(list)  list_entry((list), struct super_block, s_list)
 #define S_BIAS (1<<30)
 // 超级块
 struct super_block {
-	struct list_head	s_list;		/* Keep this first */		/* 指向所有超级块的链表 */
+	struct list_head	s_list;		/* Keep this first */		/* 指向所有超级块的链表，该结构会插入到super_blocks链表 */
 	dev_t			s_dev;		/* search index; _not_ kdev_t */	/* 设备标识符 */
-	unsigned char		s_dirt;								/* 修改（脏）标志 */
+	unsigned char		s_dirt;	/* 修改（脏）标志，用于判断超级块对象中数据是否脏了即被修改过了，即与磁盘上的超级块区域是否一致。 */
 	unsigned char		s_blocksize_bits;			/* 以位为单位的块大小 */
 	unsigned long		s_blocksize;		/* 以字节为单位的块大小 */
 	loff_t			s_maxbytes;	/* Max file size */		/* 文件大小上限 */
+	// 指向file_system_type类型的指针，file_system_type结构体用于保存具体的文件系统的信息。
 	struct file_system_type	*s_type;		/* 文件系统类型 */
+	// super_operations结构体类型的指针，因为一个超级块对应一种文件系统，
+	// 而每种文件系统的操作函数可能是不同的。super_operations结构体由一些函数指针组成，
+	// 这些函数指针用特定文件系统的超级块区域操作函数来初始化。
+	// 比如里边会有函数实现获取和返回底层文件系统inode的方法。
 	const struct super_operations	*s_op;	/* 超级块方法（对超级块操作的方法） */
 	const struct dquot_operations	*dq_op;	/* 磁盘限额方法 */
 	const struct quotactl_ops	*s_qcop;		/* 限额控制方法 */
@@ -1348,8 +1380,10 @@ struct super_block {
 #endif
 	struct xattr_handler	**s_xattr;				/* 拓展的属性操作 */
 
+	// 指向超级块对应文件系统中的所有inode索引节点的链表。
 	struct list_head	s_inodes;	/* all inodes */		/* inodes链表 */
 	struct hlist_head	s_anon;		/* anonymous dentries for (nfs) exporting */
+	// 该超级块表是的文件系统中所有被打开的文件。
 	struct list_head	s_files;	/* 被分配文件链表 */
 	/* s_dentry_lru and s_nr_dentry_unused are protected by dcache_lock */
 	struct list_head	s_dentry_lru;	/* unused dentry lru */		/* 未被使用目录项链表 */
@@ -1492,8 +1526,9 @@ struct block_device_operations;
 // 其中包括进程针对已打开文件所能调用的方法,比如read()和write()等方法
 // 文件操作表，其中的操作是UNIX系统调用的基础。具体文件系统可以为每一种操作做专门实现，或者如果存在通用操作，也可以使用通用操作。
 struct file_operations {
+	// 指向该操作表所在模块的指针，用于模块引用计数
 	struct module *owner;
-	// 该函数用于更新偏移量指针，由系统调用lleek()调用
+	// 该函数用于更新偏移量指针，由系统调用llseek()调用
 	loff_t (*llseek) (struct file *, loff_t, int);
 	// 从给定文件的offset偏移处读取count字节到buf中，由系统调用read()调用
 	ssize_t (*read) (struct file *, char __user *, size_t, loff_t *);
@@ -1539,10 +1574,13 @@ struct file_operations {
 	// 文件系统不需要实现check_flags()。目前只有NFS文件系统实现了。这个函数能使文件系统限制无效的SETFL标志，
 	// 不限制的话，普通的fcntl()函数能使标志生效。在NFS文件系统中，不允许O_APPEND和O_DIRECT相结合。
 	int (*check_flags)(int);
-	// 用来实现flock()系统调用，该调用提供忠告锁
+	// 实现文件锁定，提供POSIX兼容的锁定机制，由flock()系统调用
 	int (*flock) (struct file *, int, struct file_lock *);
+	// 实现splice写入，数据移动操作，由splice_write()系统调用
 	ssize_t (*splice_write)(struct pipe_inode_info *, struct file *, loff_t *, size_t, unsigned int);
+	// 实现splice读取，数据移动操作，由splice_read()系统调用
 	ssize_t (*splice_read)(struct file *, loff_t *, struct pipe_inode_info *, size_t, unsigned int);
+	// 设置或释放文件租约，由setlease()系统调用
 	int (*setlease)(struct file *, long, struct file_lock **);
 };
 
@@ -1579,6 +1617,7 @@ struct inode_operations {
 	// 该函数用来检查给定的inode所代表的文件是否允许特定的访问模式，如果允许返回0,否则返回负值的错误码。
 	// 多数文件系统都将此区域设置为NULL，使用VFS提供的通用方法进行检查。
 	int (*permission) (struct inode *, int);
+	// 验证对inode的访问控制列表（ACL）权限。
 	int (*check_acl)(struct inode *, int);
 	// 该函数被notify_change()调用，再修改索引节点后，通知发生了“改变事件”
 	int (*setattr) (struct dentry *, struct iattr *);
@@ -1592,9 +1631,12 @@ struct inode_operations {
 	ssize_t (*listxattr) (struct dentry *, char *, size_t);
 	// 从给定文件中删除指定的属性
 	int (*removexattr) (struct dentry *, const char *);
+	// 截断文件的特定范围，由truncate_range()调用。
 	void (*truncate_range)(struct inode *, loff_t, loff_t);
+	// 文件空间分配，由fallocate()调用。
 	long (*fallocate)(struct inode *inode, int mode, loff_t offset,
 			  loff_t len);
+	 // 映射文件的物理存储，由fiemap()调用。
 	int (*fiemap)(struct inode *, struct fiemap_extent_info *, u64 start,
 		      u64 len);
 };
@@ -1618,12 +1660,12 @@ extern ssize_t vfs_writev(struct file *, const struct iovec __user *,
 // 当文件系统需要对超级块执行操作时，首先要在超级块对象中寻找需要的操作方法，如文件系统要写自己超级块sb->s_op->write_super(sb);
 struct super_operations {
 	// 在给定的超级块下创建和初始化一个新的索引节点对象。
-   	struct inode *(*alloc_inode)(struct super_block *sb);
-		// 用于释放给定索引节点
+	struct inode *(*alloc_inode)(struct super_block *sb);
+	// 用于释放给定索引节点
 	void (*destroy_inode)(struct inode *);
 
-		// VFS在索引节点脏（被修改）时会调用此函数。日志文件系统（如ext3和ext4）执行该函数进行日志更新。
-   	void (*dirty_inode) (struct inode *);
+	// VFS在索引节点脏（被修改）时会调用此函数。日志文件系统（如ext3和ext4）执行该函数进行日志更新。
+	void (*dirty_inode) (struct inode *);
 	// 用于将给定的索引节点写入磁盘。
 	int (*write_inode) (struct inode *, struct writeback_control *wbc);
 	// 在最后一个指向索引节点的引用被释放后，VFS会调用该函数。VFS只需要简单地删除这个索引节点后，普通UNIX文件系统就不会定义这个函数了。
@@ -1636,8 +1678,11 @@ struct super_operations {
 	void (*write_super) (struct super_block *);
 	// 使文件系统的数据元与磁盘上的文件系统进行同步，wait参数指定操作是否同步。
 	int (*sync_fs)(struct super_block *sb, int wait);
+	// 冻结文件系统。
 	int (*freeze_fs) (struct super_block *);
+	// 解冻文件系统。
 	int (*unfreeze_fs) (struct super_block *);
+	// vfs通过该函数获取文件系统的状态
 	int (*statfs) (struct dentry *, struct kstatfs *);
 	// 当指定新的安装选项重新安装文件系统时，VFS会调用该函数。调用者必须一直持有s_lock锁。
 	int (*remount_fs) (struct super_block *, int *, char *);
@@ -1646,12 +1691,17 @@ struct super_operations {
 	// VFS调用该函数中断安装操作。该函数被网络文件系统使用，如NFS。
 	void (*umount_begin) (struct super_block *);
 
+	// 显示文件系统的选项。
 	int (*show_options)(struct seq_file *, struct vfsmount *);
+	// 显示文件系统的统计信息。
 	int (*show_stats)(struct seq_file *, struct vfsmount *);
 #ifdef CONFIG_QUOTA
+	// 读取配额数据。
 	ssize_t (*quota_read)(struct super_block *, int, char *, size_t, loff_t);
+	// 写入配额数据。
 	ssize_t (*quota_write)(struct super_block *, int, const char *, size_t, loff_t);
 #endif
+	// 尝试释放块设备的页面。
 	int (*bdev_try_to_free_page)(struct super_block*, struct page*, gfp_t);
 };
 
@@ -1815,7 +1865,8 @@ struct file_system_type {
 	// get_sb()函数从磁盘读取超级块，并且在文件系统被安装时，在内存中组装超级块对象，剩余的函数描述文件系统属性。
 	int (*get_sb) (struct file_system_type *, int,
 		       const char *, void *, struct vfsmount *);		// 从磁盘中读取超级块
-	void (*kill_sb) (struct super_block *);		// 终止访问超级
+	// 终止访问超级块
+	void (*kill_sb) (struct super_block *);
 	struct module *owner;		// 文件系统模块
 	struct file_system_type * next;		// 链表中下一个文件系统类型
 	struct list_head fs_supers;				// 超级块对象链表

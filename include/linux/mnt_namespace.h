@@ -6,12 +6,16 @@
 #include <linux/seq_file.h>
 #include <linux/wait.h>
 
-// 有三个将VFS层和系统的进程紧密联系在一起，它们分别是file_struct, fs_struct, namespace结构体。
+// 有三个将VFS层和系统的进程紧密联系在一起，它们分别是file_struct, fs_struct, namespace(mnt_namespace)结构体。
 /**
- *  上述这些数据结构都是通过进程描述符连接起来的，对多数进程来说，它们的描述符都指向唯一的
+ * 上述这些数据结构都是通过进程描述符连接起来的，对多数进程来说，它们的描述符都指向唯一的
  * files_struct和fs_struct结构体。但对于那些使用CLONE_FILES或CLONE_FS创建的进程，
  * 会共享这两个结构体。所以多进程描述符可能指向同一个files_struct或fs_struct结构体，
  * 每个结构体都维护一个count域作为引用计数，防止在进程正使用时，该结构被撤销。
+ * 
+ * 默认情况下，所有的进程会共享同样的命名空间（它们都从相同的挂载点中看到同一个文件系统层次结构）。
+ * 只有在进行clone()操作时指定了CLONE_NEW标志，才会给进程一个唯一的命名空间结构体的拷贝。
+ * 因为大多数进程不提供这个标志，所有进程都继承其父进程的命名空间。因此大多数系统只有一个命名空间。
  */
 struct mnt_namespace {
 	atomic_t		count;	// 结构的使用计数

@@ -60,6 +60,8 @@ static struct kmem_cache *dentry_cache __read_mostly;
 
 static unsigned int d_hash_mask __read_mostly;
 static unsigned int d_hash_shift __read_mostly;
+// 哈希表维护在内存中的所有目录项，哈希表中每个元素都是一个双向循环链表，用于维护哈希值相等的目录项，
+// 这个双向循环链表是通过dentry中的d_hash成员来链接在一起的。
 static struct hlist_head *dentry_hashtable __read_mostly;
 
 /* Statistics gathering. */
@@ -1355,7 +1357,7 @@ EXPORT_SYMBOL(d_add_ci);
  * d_lookup() is protected against the concurrent renames in some unrelated
  * directory using the seqlockt_t rename_lock.
  */
-
+// 如果在dcache（缓存，即dentry_hashtable）中发现了与其匹配的目录项对象，则匹配的对象被返回，否则返回NULL。
 struct dentry * d_lookup(struct dentry * parent, struct qstr * name)
 {
 	struct dentry * dentry = NULL;
@@ -1376,6 +1378,7 @@ struct dentry * __d_lookup(struct dentry * parent, struct qstr * name)
 	unsigned int len = name->len;
 	unsigned int hash = name->hash;
 	const unsigned char *str = name->name;
+	// 获取dentry_hashtable其中的一个元素，这个元素本身又是一个链表
 	struct hlist_head *head = d_hash(parent,hash);
 	struct dentry *found = NULL;
 	struct hlist_node *node;
@@ -1383,6 +1386,7 @@ struct dentry * __d_lookup(struct dentry * parent, struct qstr * name)
 
 	rcu_read_lock();
 	
+	// 通过便利dentry_hashtable中的链表来完成查找
 	hlist_for_each_entry_rcu(dentry, node, head, d_hash) {
 		struct qstr *qstr;
 
@@ -2293,6 +2297,8 @@ static void __init dcache_init_early(void)
 	if (hashdist)
 		return;
 
+	// 哈希表维护在内存中的所有目录项，哈希表中每个元素都是一个双向循环链表，用于维护哈希值相等的目录项，
+	// 这个双向循环链表是通过dentry中的d_hash成员来链接在一起的。
 	dentry_hashtable =
 		alloc_large_system_hash("Dentry cache",
 					sizeof(struct hlist_head),

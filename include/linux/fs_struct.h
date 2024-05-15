@@ -3,14 +3,14 @@
 
 #include <linux/path.h>
 
-// 有三个将VFS层和系统的进程紧密联系在一起，它们分别是file_struct, fs_struct, namespace结构体。
+// 有三个将VFS层和系统的进程紧密联系在一起，它们分别是file_struct, fs_struct, namespace(mnt_namespace)结构体。
 // 和进程相关的结构体，描述了文件系统
 // 由进程描述符中的 fs 域指向，包含文件系统和进程相关的信息。
 struct fs_struct {
-	int users;		// 用户数目
+	int users;				// 用户数目
 	rwlock_t lock;		// 保护该结构体的锁
-	int umask;		// 掩码
-	int in_exec;	// 当前正执行的文件
+	int umask;				// 掩码
+	int in_exec;			// 当前正执行的文件
 	// 当前工作目录(pwd)和根目录
 	struct path root, pwd;	// 根目录路径和当前工作目录路径
 };

@@ -41,7 +41,7 @@
 #include <asm/uaccess.h>
 #include "internal.h"
 
-
+// 链表，用来将所有的super_block（超级块）连接起来
 LIST_HEAD(super_blocks);
 DEFINE_SPINLOCK(sb_lock);
 

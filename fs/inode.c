@@ -73,8 +73,15 @@ static unsigned int i_hash_shift __read_mostly;
  * allowing for low-overhead inode sync() operations.
  */
 
+// 当前正在使用的inode链表，i_count > 0且 i_nlink > 0
 LIST_HEAD(inode_in_use);
+// 目前未被使用的inode节点链表，即尚在内存中没有销毁，但是没有进程使用，i_count为0。
 LIST_HEAD(inode_unused);
+// 为了加快查找效率，将正在使用的和脏的inode放入一个哈希表中，
+// 但是不同的inode的哈希值可能相等，hash值相等的inode哦那个过i_hash成员连接。
+// 注意在inode_hashtable哈希表中的元素是链表，是通过inode对象中的
+// i_hash成员链接起来的双向循环链表，在这个子链表中对应的inode的哈希值是相等的。
+// 即inode_hashtable本质是一个数组和链表的结合体。
 static struct hlist_head *inode_hashtable __read_mostly;
 
 /*
@@ -1546,6 +1553,8 @@ void __init inode_init_early(void)
 	if (hashdist)
 		return;
 
+	// 为了加快查找效率，将正在使用的和脏的inode放入一个哈希表中，
+	// 但是不同的inode的哈希值可能相等，hash值相等的inode通过过i_hash成员连接。
 	inode_hashtable =
 		alloc_large_system_hash("Inode-cache",
 					sizeof(struct hlist_head),

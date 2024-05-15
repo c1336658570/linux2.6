@@ -62,7 +62,7 @@ struct vfsmount {
 	// MNT_NOSUID，禁止该文件系统的可执行文件设置setuid和setgid标志
 	// MNT_MODEV，禁止访问该文件系统上的设备文件
 	// MNT_NOEXEC，禁止执行该文件系统上的可执行文件
-	int mnt_flags;		/* 安装标志 */
+	int mnt_flags;		/* 安装标志，该文件还有其他一些不常用标志 */
 	/* 4 bytes hole on 64bits arches */
 	const char *mnt_devname;	/* Name of device e.g. /dev/dsk/hda1 */	/* 设备文件名 e.g. /dev/dsk/hda1 */
 	struct list_head mnt_list;		/* 描述符链表 */
@@ -79,7 +79,7 @@ struct vfsmount {
 	 * to let these frequently modified fields in a separate cache line
 	 * (so that reads of mnt_flags wont ping-pong on SMP machines)
 	 */
-	atomic_t mnt_count;		/* 使用计数 */
+	atomic_t mnt_count;		/* 引用计数，用于管理此结构的生命周期 */
 	int mnt_expiry_mark;		/* true if marked for expiry */		/* 如果标记为到期，则为 True */
 	int mnt_pinned;				/* "钉住"进程计数 */
 	int mnt_ghosts;				/* "镜像"引用计数 */

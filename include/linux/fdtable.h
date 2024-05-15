@@ -40,7 +40,8 @@ struct fdtable {
 /*
  * Open file table structure
  */
-// 每个进程多有自己的一组打开的文件，像跟文件系统，当前工作目录，安装点等。有三个将VFS层和系统的进程紧密联系在一起，它们分别是file_struct, fs_struct, namespace结构体。
+// 每个进程多有自己的一组打开的文件，像跟文件系统，当前工作目录，安装点等。
+// 有三个将VFS层和系统的进程紧密联系在一起，它们分别是file_struct, fs_struct, namespace(mnt_namespace)结构体。
 // 该结构体由进程描述符的files目录项指向，所有与单个进程相关的信息(如打开的文件及文件描述符)都包含在其中
 struct files_struct {
   /*
@@ -54,11 +55,12 @@ struct files_struct {
    */
 	spinlock_t file_lock ____cacheline_aligned_in_smp;
 	int next_fd;		// 缓存下一个可用的fd
-	struct embedded_fd_set close_on_exec_init;	// exec()时关闭的文件描述符表
+	struct embedded_fd_set close_on_exec_init;	// exec()时关闭的文件描述符链表
 	struct embedded_fd_set open_fds_init;		// 打开的文件描述符链表
 	// fd_array数组指向已打开的文件对象。如果一个进程打开的文件对象超过NR_OPEN_DEFAULT，那么内核就会重新分配一个数组，
-	// 并且将fdt指针指向它。
-	struct file * fd_array[NR_OPEN_DEFAULT];	// 缺省的文件对象数组
+	// 并且将fdt指针指向它。如果有大量的进程打开的文件描述符都超过NR_OPEN_DEFAULT，那么为了减少内存分配次数，
+	// 提高性能，可以适当的提高NR_OPEN_DEFAULT的值。
+	struct file * fd_array[NR_OPEN_DEFAULT];	// 缺省的文件对象数组，默认是64
 };
 
 #define rcu_dereference_check_fdtable(files, fdtfd) \

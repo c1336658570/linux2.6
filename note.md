@@ -91,3 +91,17 @@ M       include/linux/fs.h
 M       include/linux/fs_struct.h
 M       include/linux/mnt_namespace.h
 M       include/linux/mount.h
+M       fs/dcache.c
+M       fs/inode.c
+M       fs/super.c
+M       include/linux/dcache.h
+M       include/linux/fdtable.h
+M       include/linux/fs.h
+M       include/linux/fs_struct.h
+M       include/linux/mnt_namespace.h
+M       include/linux/mount.h
+M       include/linux/path.h
+M       include/linux/quota.h
+M       include/linux/sched.h
+M       include/linux/writeback.h
+M       kernel/futex.c

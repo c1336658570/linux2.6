@@ -1344,8 +1344,10 @@ struct task_struct {
 /* CPU-specific state of this task */
 	struct thread_struct thread;
 /* filesystem information */
+// 包含文件系统和进程相关信息
 	struct fs_struct *fs;
 /* open file information */
+// 打开文件信息（打开文件表）
 	struct files_struct *files;
 /* namespaces */
 	struct nsproxy *nsproxy;

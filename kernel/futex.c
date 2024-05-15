@@ -110,16 +110,18 @@ struct futex_pi_state {
  * PI futexes are typically woken before they are removed from the hash list via
  * the rt_mutex code. See unqueue_me_pi().
  */
+// struct futex_q结构将一个futex变量与一个挂起的进程（线程）关联起来
 struct futex_q {
-	struct plist_node list;
+	struct plist_node list;		 // 链表节点
 
-	struct task_struct *task;
-	spinlock_t *lock_ptr;
-	union futex_key key;
+	struct task_struct *task;			// 挂起在该futex变量关联的进程（线程）
+	spinlock_t *lock_ptr;					// 自旋锁，控制链表访问
+	union futex_key key;					// futex变量地址标识
+	// 下面三个与优先级继承相关
 	struct futex_pi_state *pi_state;
 	struct rt_mutex_waiter *rt_waiter;
 	union futex_key *requeue_pi_key;
-	u32 bitset;
+	u32 bitset;		// 类似掩码匹配
 };
 
 /*
@@ -127,8 +129,14 @@ struct futex_q {
  * location.  Each key may have multiple futex_q structures, one for each task
  * waiting on a futex.
  */
+// 内核中通过一个全局哈希表来维护所有挂起阻塞在futex变量上的进程（线程），不同的futex变量会根据
+// 其地址标识计算出一个hash key并定位到一个bucket上，因此挂起阻塞在同一个futex变量的所有进程
+// （线程）会对应到同一个bucket上
 struct futex_hash_bucket {
-	spinlock_t lock;
+	// struct futex_q中lock_ptr，就是引用其所在的bucket的自旋锁
+	spinlock_t lock;		 // 自旋锁，用于控制chain的访问
+	// 优先级链，与传统等待队列不同，futex使用优先级链表来实现等待队列，
+	// 是为了实现优先级继承，从而解决优先级翻转问题
 	struct plist_head chain;
 };
 
@@ -2646,7 +2654,7 @@ SYSCALL_DEFINE6(futex, u32 __user *, uaddr, int, op, u32, val,
 
 static int __init futex_init(void)
 {
-	u32 curval;
+	u32 curval;	// 当前值
 	int i;
 
 	/*
@@ -2659,11 +2667,15 @@ static int __init futex_init(void)
 	 * implementation, the non functional ones will return
 	 * -ENOSYS.
 	 */
+	// 这将失败，而且我们希望如此。一些架构的实现在运行时检测futex_atomic_cmpxchg_inatomic()功能。
+	// 我们希望在调用任何复杂的代码路径之前知道这一点。此外，我们还希望在这种情况下阻止鲁棒列表的注册。
+	// NULL保证引发错误，并且我们在功能实现上得到-EFAULT，而非功能实现将返回-ENOSYS。
 	curval = cmpxchg_futex_value_locked(NULL, 0, 0);
 	if (curval == -EFAULT)
 		futex_cmpxchg_enabled = 1;
 
 	for (i = 0; i < ARRAY_SIZE(futex_queues); i++) {
+		// 初始化 futex_queues 数组中每个元素的链表和锁
 		plist_head_init(&futex_queues[i].chain, &futex_queues[i].lock);
 		spin_lock_init(&futex_queues[i].lock);
 	}

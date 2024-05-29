@@ -155,33 +155,52 @@ enum rq_flag_bits {
  * if you modify this structure, be sure to check block/blk-core.c:rq_init()
  * as well!
  */
+/*
+ * 尽量将经常一起引用的字段放在同一个缓存行中。
+ * 如果你修改了这个结构体，请确保检查 block/blk-core.c:rq_init()。
+ */
 struct request {
+	/* 用于将请求链接到队列中 */
 	struct list_head queuelist;
+	/* 用于单核调用 */
 	struct call_single_data csd;
 
+	/* 指向请求队列的指针 */
 	struct request_queue *q;
 
-	unsigned int cmd_flags;
-	enum rq_cmd_type_bits cmd_type;
-	unsigned long atomic_flags;
+	unsigned int cmd_flags;          /* 命令标志 */
+	enum rq_cmd_type_bits cmd_type;  /* 命令类型 */
+	unsigned long atomic_flags;      /* 原子操作标志 */
 
-	int cpu;
+	int cpu;                         /* 处理此请求的 CPU */
 
 	/* the following two fields are internal, NEVER access directly */
+	/* 以下两个字段是内部的，永远不要直接访问 */
+	/* 总数据长度 */
 	unsigned int __data_len;	/* total data len */
+	/* 扇区游标 */
 	sector_t __sector;		/* sector cursor */
 
+	/* 指向第一个 bio 的指针 */
 	struct bio *bio;
+	/* 指向最后一个 bio 的指针 */
 	struct bio *biotail;
 
+	/* 合并哈希 */
 	struct hlist_node hash;	/* merge hash */
 	/*
 	 * The rb_node is only used inside the io scheduler, requests
 	 * are pruned when moved to the dispatch queue. So let the
 	 * completion_data share space with the rb_node.
 	 */
+	/*
+	 * rb_node 仅在 I/O 调度器内部使用，请求在移动到调度队列时会被修剪。
+	 * 所以让 completion_data 与 rb_node 共享空间。
+	 */
 	union {
+		/* 用于排序/查找 */
 		struct rb_node rb_node;	/* sort/lookup */
+		/* 完成数据 */
 		void *completion_data;
 	};
 
@@ -189,52 +208,78 @@ struct request {
 	 * two pointers are available for the IO schedulers, if they need
 	 * more they have to dynamically allocate it.
 	 */
-	void *elevator_private;
-	void *elevator_private2;
+	/*
+	 * 两个指针用于 I/O 调度器，如果它们需要更多，则必须动态分配。
+	 */
+	void *elevator_private;	/* I/O 调度器私有数据 */
+	void *elevator_private2;	/* I/O 调度器额外的私有数据 */
 
+	/* 请求的磁盘 */
 	struct gendisk *rq_disk;
+	/* 请求开始时间 */
 	unsigned long start_time;
 
 	/* Number of scatter-gather DMA addr+len pairs after
 	 * physical address coalescing is performed.
 	 */
+	/* 在执行物理地址合并后的散布-聚集 DMA 地址和长度对的数量 */
 	unsigned short nr_phys_segments;
 
+	/* I/O 优先级 */
 	unsigned short ioprio;
 
+	/* 引用计数 */
 	int ref_count;
 
+	/* 供低级驱动使用的不透明指针 */
 	void *special;		/* opaque pointer available for LLD use */
+	/* 如果可用，当前段的内核地址 */
 	char *buffer;		/* kaddr of the current segment if available */
 
+	/* 请求标签 */
 	int tag;
+	/* 错误计数 */
 	int errors;
 
 	/*
 	 * when request is used as a packet command carrier
 	 */
-	unsigned char __cmd[BLK_MAX_CDB];
-	unsigned char *cmd;
-	unsigned short cmd_len;
+	/*
+	 * 当请求被用作数据包命令载体时
+	 */
+	unsigned char __cmd[BLK_MAX_CDB];/* 命令存储区 */
+	unsigned char *cmd;              /* 指向命令的指针 */
+	unsigned short cmd_len;          /* 命令长度 */
 
+	/* 对齐和填充长度 */
 	unsigned int extra_len;	/* length of alignment and padding */
+	/* 传感数据长度 */
 	unsigned int sense_len;
+	/* 剩余计数 */
 	unsigned int resid_len;	/* residual count */
+	/* 传感数据 */
 	void *sense;
 
+	/* 截止时间 */
 	unsigned long deadline;
+	/* 超时列表 */
 	struct list_head timeout_list;
+	/* 超时值 */
 	unsigned int timeout;
+	/* 重试次数 */
 	int retries;
 
 	/*
 	 * completion callback.
 	 */
-	rq_end_io_fn *end_io;
-	void *end_io_data;
+	/*
+	 * 完成回调。
+	 */
+	rq_end_io_fn *end_io;	/* 完成 I/O 的回调函数 */
+	void *end_io_data;		/* 完成 I/O 回调的数据 */
 
 	/* for bidi */
-	struct request *next_rq;
+	struct request *next_rq;	/* 指向下一个请求的指针 */
 };
 
 static inline unsigned short req_get_ioprio(struct request *req)
@@ -325,122 +370,127 @@ struct queue_limits {
 	signed char		discard_zeroes_data;
 };
 
-struct request_queue
-{
+struct request_queue {
 	/*
-	 * Together with queue_head for cacheline sharing
+	 * 与 queue_head 一起用于缓存行共享
 	 */
-	struct list_head	queue_head;
-	struct request		*last_merge;
-	struct elevator_queue	*elevator;
-
-	/*
-	 * the queue request freelist, one for reads and one for writes
-	 */
-	struct request_list	rq;
-
-	request_fn_proc		*request_fn;
-	make_request_fn		*make_request_fn;
-	prep_rq_fn		*prep_rq_fn;
-	unplug_fn		*unplug_fn;
-	merge_bvec_fn		*merge_bvec_fn;
-	prepare_flush_fn	*prepare_flush_fn;
-	softirq_done_fn		*softirq_done_fn;
-	rq_timed_out_fn		*rq_timed_out_fn;
-	dma_drain_needed_fn	*dma_drain_needed;
-	lld_busy_fn		*lld_busy_fn;
+	struct list_head	queue_head;     /* 请求队列头 */
+	struct request		*last_merge;    /* 最后一个被合并的请求 */
+	struct elevator_queue	*elevator;      /* I/O 调度器 */
 
 	/*
-	 * Dispatch queue sorting
+	 * 请求队列的空闲列表，分别为读取和写入请求
 	 */
-	sector_t		end_sector;
-	struct request		*boundary_rq;
+	struct request_list	rq;             /* 管理空闲请求的列表 */
+
+	request_fn_proc		*request_fn;    /* 处理请求的函数 */
+	make_request_fn		*make_request_fn; /* 直接创建请求的函数 */
+	prep_rq_fn		*prep_rq_fn;    /* 准备请求的函数 */
+	unplug_fn		*unplug_fn;     /* 设备插拔函数 */
+	merge_bvec_fn		*merge_bvec_fn; /* 合并 bio 向量的函数 */
+	prepare_flush_fn	*prepare_flush_fn; /* 准备刷新的函数 */
+	softirq_done_fn		*softirq_done_fn; /* 处理完软中断后的函数 */
+	rq_timed_out_fn		*rq_timed_out_fn; /* 请求超时处理函数 */
+	dma_drain_needed_fn	*dma_drain_needed; /* 需要 DMA drain 的函数 */
+	lld_busy_fn		*lld_busy_fn;    /* 低级设备忙碌的函数 */
 
 	/*
-	 * Auto-unplugging state
+	 * 调度队列排序
 	 */
-	struct timer_list	unplug_timer;
-	int			unplug_thresh;	/* After this many requests */
-	unsigned long		unplug_delay;	/* After this many jiffies */
-	struct work_struct	unplug_work;
-
-	struct backing_dev_info	backing_dev_info;
+	sector_t		end_sector;      /* 结束扇区 */
+	struct request		*boundary_rq;    /* 边界请求 */
 
 	/*
-	 * The queue owner gets to use this for whatever they like.
-	 * ll_rw_blk doesn't touch it.
+	 * 自动插拔状态
 	 */
-	void			*queuedata;
+	struct timer_list	unplug_timer;    /* 插拔计时器 */
+	int			unplug_thresh;   /* 触发插拔的请求阈值 */
+	unsigned long		unplug_delay;    /* 插拔延迟，以 jiffies 计 */
+	struct work_struct	unplug_work;     /* 插拔工作结构 */
+
+	struct backing_dev_info	backing_dev_info; /* 后端设备信息 */
 
 	/*
-	 * queue needs bounce pages for pages above this limit
+	 * 队列所有者可以使用这个字段做任何他们喜欢的事情。
+	 * ll_rw_blk 不会接触它。
 	 */
-	gfp_t			bounce_gfp;
+	void			*queuedata;      /* 队列数据，供所有者使用 */
 
 	/*
-	 * various queue flags, see QUEUE_* below
+	 * 队列需要反弹页用于高于此限制的页面
 	 */
-	unsigned long		queue_flags;
+	gfp_t			bounce_gfp;      /* 分配反弹缓冲区的 GFP 标志 */
 
 	/*
-	 * protects queue structures from reentrancy. ->__queue_lock should
-	 * _never_ be used directly, it is queue private. always use
-	 * ->queue_lock.
+	 * 各种队列标志，见下面的 QUEUE_*
 	 */
-	spinlock_t		__queue_lock;
-	spinlock_t		*queue_lock;
+	unsigned long		queue_flags;     /* 队列标志位 */
 
 	/*
-	 * queue kobject
+	 * 保护队列结构免受重入。->__queue_lock 应该 _永远_ 不被直接使用，
+	 * 它是队列私有的。总是使用 ->queue_lock。
 	 */
-	struct kobject kobj;
+	spinlock_t		__queue_lock;    /* 队列的内部锁 */
+	spinlock_t		*queue_lock;     /* 队列的锁指针 */
 
 	/*
-	 * queue settings
+	 * 队列 kobject
 	 */
+	struct kobject kobj;               /* 队列的内核对象 */
+
+	/*
+	 * 队列设置
+	 */
+	/* 请求的最大数目 */
 	unsigned long		nr_requests;	/* Max # of requests */
-	unsigned int		nr_congestion_on;
-	unsigned int		nr_congestion_off;
-	unsigned int		nr_batching;
+	unsigned int		nr_congestion_on; /* 启动拥塞的请求数 */
+	unsigned int		nr_congestion_off; /* 停止拥塞的请求数 */
+	unsigned int		nr_batching;    /* 批处理数 */
 
-	void			*dma_drain_buffer;
-	unsigned int		dma_drain_size;
-	unsigned int		dma_pad_mask;
-	unsigned int		dma_alignment;
+	void			*dma_drain_buffer; /* DMA drain 缓冲区 */
+	unsigned int		dma_drain_size; /* DMA drain 缓冲区大小 */
+	unsigned int		dma_pad_mask;   /* DMA 填充掩码 */
+	unsigned int		dma_alignment;  /* DMA 对齐 */
 
-	struct blk_queue_tag	*queue_tags;
-	struct list_head	tag_busy_list;
+	struct blk_queue_tag	*queue_tags;    /* 队列标签 */
+	struct list_head	tag_busy_list;  /* 繁忙标签列表 */
 
-	unsigned int		nr_sorted;
-	unsigned int		in_flight[2];
+	unsigned int		nr_sorted;      /* 已排序的数目 */
+	unsigned int		in_flight[2];   /* 飞行中的请求数 */
 
-	unsigned int		rq_timeout;
-	struct timer_list	timeout;
-	struct list_head	timeout_list;
+	unsigned int		rq_timeout;     /* 请求超时时间 */
+	struct timer_list	timeout;        /* 超时计时器 */
+	struct list_head	timeout_list;   /* 超时列表 */
 
-	struct queue_limits	limits;
+	struct queue_limits	limits;         /* 队列限制 */
 
 	/*
 	 * sg stuff
 	 */
-	unsigned int		sg_timeout;
-	unsigned int		sg_reserved_size;
-	int			node;
+	/*
+	 * sg 相关
+	 */
+	unsigned int		sg_timeout;	/* sg 超时 */
+	unsigned int		sg_reserved_size;	/* 预留 sg 大小 */
+	int			node;		/* NUMA 节点 */
 #ifdef CONFIG_BLK_DEV_IO_TRACE
-	struct blk_trace	*blk_trace;
+	struct blk_trace	*blk_trace;	/* I/O 跟踪 */
 #endif
 	/*
 	 * reserved for flush operations
 	 */
+	/*
+	 * 保留用于刷新操作
+	 */
 	unsigned int		ordered, next_ordered, ordseq;
 	int			orderr, ordcolor;
 	struct request		pre_flush_rq, bar_rq, post_flush_rq;
-	struct request		*orig_bar_rq;
+	struct request		*orig_bar_rq;	/* 原始刷新请求 */
 
-	struct mutex		sysfs_lock;
+	struct mutex		sysfs_lock;			/* sysfs 锁 */
 
 #if defined(CONFIG_BLK_DEV_BSG)
-	struct bsg_class_device bsg_dev;
+	struct bsg_class_device bsg_dev;		/* 块存储管理设备 */
 #endif
 };
 

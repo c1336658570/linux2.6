@@ -43,9 +43,18 @@
 /*
  * was unsigned short, but we might as well be ready for > 64kB I/O pages
  */
+/*
+ * 此结构体被用于描述一个 I/O 操作中的内存片段。
+ * 注释中提到，之前这里使用 unsigned short 类型，
+ * 但为了支持大于 64KB 的 I/O 页面，现在使用 unsigned int。
+ */
+// 片段所在的物理页、块在物理页中的偏移、从给定偏移量开始的块长度
 struct bio_vec {
+	/* 指向此片段对应的物理页的指针 */
 	struct page	*bv_page;
+	/* 此片段的长度，单位为字节 */
 	unsigned int	bv_len;
+	/* 从页的起始位置到片段起始位置的偏移量，单位为字节 */
 	unsigned int	bv_offset;
 };
 
@@ -60,47 +69,71 @@ typedef void (bio_destructor_t) (struct bio *);
  * stacking drivers)
  */
 struct bio {
+	// 磁盘上相关的扇区
 	sector_t		bi_sector;	/* device address in 512 byte
 						   sectors */
+	// 请求链表
 	struct bio		*bi_next;	/* request queue link */
+	// 相关的块设备
 	struct block_device	*bi_bdev;
+	// 状态和命令标志
 	unsigned long		bi_flags;	/* status, command, etc */
+	// 读还是写
 	unsigned long		bi_rw;		/* bottom bits READ/WRITE,
 						 * top bits priority
 						 */
 
+	// bi_vcnt用来描述bi_io_vec所指向的bio_vec数组中向量的数目
 	unsigned short		bi_vcnt;	/* how many bio_vec's */
+	// 每个io操作完成后，bi_io_vec指向bi_io_vec数组的当前索引
+	// 当块I/O层开始执行请求、需要使用各个片段时，bi_idx域会不断更新，从而总指向当前片段
 	unsigned short		bi_idx;		/* current index into bvl_vec */
 
 	/* Number of segments in this BIO after
 	 * physical address coalescing is performed.
 	 */
+	// 结合后的片段数目
 	unsigned int		bi_phys_segments;
 
+	// I/O计数
 	unsigned int		bi_size;	/* residual I/O count */
 
 	/*
 	 * To keep track of the max segment size, we account for the
 	 * sizes of the first and last mergeable segments in this bio.
 	 */
+	// 第一个可合并的段大小
 	unsigned int		bi_seg_front_size;
+	// 最后一个可合并的段大小
 	unsigned int		bi_seg_back_size;
 
+	// bio_vecs数目上限
 	unsigned int		bi_max_vecs;	/* max bvl_vecs we can hold */
 
+	// 结束CPU
 	unsigned int		bi_comp_cpu;	/* completion CPU */
 
+	// 使用计数，如果该域值减为0,就应该撤销该bio结构体，并释放它所占内存
+	// 通过bio_get和bio_put来管理该结构体bio的引用计数。
 	atomic_t		bi_cnt;		/* pin count */
 
+	// bio_vecs链表
+	// bio需要携带的bio_vec数量不超过BIO_INLINE_VECS(4)时，
+	// bi_io_vec指向bi_inline_vecs，如果超过BIO_INLINE_VECS,
+	// 则从bio_vec专有的sl之i_inline_vecs的空间就被浪费了.
 	struct bio_vec		*bi_io_vec;	/* the actual vec list */
 
+	// bio完成时调用
 	bio_end_io_t		*bi_end_io;
 
+	// bio私有数据
+	// 这是一个属于拥有者（也就是创建者）的私有域，只有创建了bio结构体的拥有者可以读写该域。
 	void			*bi_private;
 #if defined(CONFIG_BLK_DEV_INTEGRITY)
 	struct bio_integrity_payload *bi_integrity;  /* data integrity */
 #endif
 
+	// 撤销方法
 	bio_destructor_t	*bi_destructor;	/* destructor */
 
 	/*
@@ -108,6 +141,7 @@ struct bio {
 	 * double allocations for a small number of bio_vecs. This member
 	 * MUST obviously be kept at the very end of the bio.
 	 */
+	// 内嵌bio_vec数组
 	struct bio_vec		bi_inline_vecs[0];
 };
 
@@ -306,6 +340,7 @@ static inline int bio_has_allocated_vec(struct bio *bio)
  * returns. and then bio would be freed memory when if (bio->bi_flags ...)
  * runs
  */
+// 通过bio_get和bio_put来管理该结构体bio的引用计数，bio_get增加bio结构体的引用计数。
 #define bio_get(bio)	atomic_inc(&(bio)->bi_cnt)
 
 #if defined(CONFIG_BLK_DEV_INTEGRITY)
@@ -360,6 +395,7 @@ extern void bioset_free(struct bio_set *);
 extern struct bio *bio_alloc(gfp_t, int);
 extern struct bio *bio_kmalloc(gfp_t, int);
 extern struct bio *bio_alloc_bioset(gfp_t, int, struct bio_set *);
+// 通过bio_get和bio_put来管理该结构体bio的引用计数，bio_put减少bio结构体的引用计数。
 extern void bio_put(struct bio *);
 extern void bio_free(struct bio *, struct bio_set *);
 

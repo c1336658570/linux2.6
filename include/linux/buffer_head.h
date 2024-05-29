@@ -17,26 +17,44 @@
 #ifdef CONFIG_BLOCK
 
 enum bh_state_bits {
+	// 该缓冲区包含可用数据
 	BH_Uptodate,	/* Contains valid data */
+	// 该缓冲区是脏的
 	BH_Dirty,	/* Is dirty */
+	// 该缓冲区正在被I/O操作使用，被锁定以防止并发访问
 	BH_Lock,	/* Is locked */
+	// 该缓冲区有I/O请求操作
 	BH_Req,		/* Has been submitted for I/O */
+	// 用于页面中的第一个缓冲区，以串行化页面中其他缓冲区的 I/O 完成
 	BH_Uptodate_Lock,/* Used by the first bh in a page, to serialise
 			  * IO completion of other buffers in the page
 			  */
 
+	// 该缓冲区是映射磁盘块的可用缓冲区
 	BH_Mapped,	/* Has a disk mapping */
+	// 该缓冲区是通过get_block刚刚映射的，尚且不能访问
 	BH_New,		/* Disk mapping was newly created by get_block */
+	// 该缓冲区正在通过end_buffer_async_read被异步I/O读操作使用
 	BH_Async_Read,	/* Is under end_buffer_async_read I/O */
+	// 该缓冲区正通过end_buffer_async_write被异步I/O写操作使用
 	BH_Async_Write,	/* Is under end_buffer_async_write I/O */
+	// 该缓冲区尚未和磁盘块相关联
 	BH_Delay,	/* Buffer is not yet allocated on disk */
+	// 该缓冲区处于连续块区边界，下一个块不再连续
 	BH_Boundary,	/* Block is followed by a discontiguity */
+	// 该缓冲区在写的时候遇到I/O错误
 	BH_Write_EIO,	/* I/O error on write */
+	// 顺序写
 	BH_Ordered,	/* ordered write */
+	// 该缓冲区发生不被支持的错误
 	BH_Eopnotsupp,	/* operation not supported (barrier) */
+	// 该缓冲区在硬盘上的空间已被申请，但是没有实际的数据写出
 	BH_Unwritten,	/* Buffer is allocated on disk but not written */
+	// 此缓冲区禁止错误
 	BH_Quiet,	/* Buffer Error Prinks to be quiet */
 
+	// 不是可用状态标志位，使用它是为了指明可被其他代码使用的起始位。块I/O层不会使用该标志位或更高的位。
+	// 驱动程序可以在这些位中定义自己的状态标志，只要保证不与块I/O层专用位发生冲突就行。
 	BH_PrivateStart,/* not a state bit, but the first bit available
 			 * for private allocation by other entities
 			 */
@@ -58,21 +76,51 @@ typedef void (bh_end_io_t)(struct buffer_head *bh, int uptodate);
  * a page (via a page_mapping) and for wrapping bio submission
  * for backward compatibility reasons (e.g. submit_bh).
  */
+/*
+ * 结构体 buffer_head 在 Linux 内核中定义，用于管理文件系统的块映射和缓冲区头。
+ * 历史上，buffer_head 用于映射页面内的单个块，并作为通过文件系统和块层的 I/O 单元。
+ * 现在，基本的 I/O 单位是 bio，buffer_head 主要用于：
+ * 1. 通过 get_block_t 调用提取块映射，
+ * 2. 通过 page_mapping 追踪页面内的状态，
+ * 3. 为向后兼容而封装 bio 提交（例如 submit_bh）。
+ */
+// 缓冲区头的目的在于描述磁盘块和物理内存缓冲区（在特定页面上的字节序列）之间的映射关系。
+// 该结构只有一个作用，说明缓冲区到块的映射关系
 struct buffer_head {
+	// 缓冲区的状态标志，在bh_state_bits的enum中
 	unsigned long b_state;		/* buffer state bitmap (see above) */
+	// 页面中的缓冲区
+	// b_this_page 字段链接了同一物理页的所有缓冲区头，形成一个循环链表。
+	// 因为一个页4K，如果一个块1K，那么一页就可以有4个缓冲区，b_this_page将这4个缓冲区连在一起
 	struct buffer_head *b_this_page;/* circular list of page's buffers */
+	// 存储缓冲区的页面（与缓冲区对应的内存物理页）
 	struct page *b_page;		/* the page this bh is mapped to */
 
+	// 起始块号，是b_bdev域所对应的设备的逻辑块号
 	sector_t b_blocknr;		/* start block number */
+	// 映像的大小
 	size_t b_size;			/* size of mapping */
+	// 页面内的数据指针，直接指向相应的块（它位于b_page域所指明的页面中的某个位置上）
+	// 块大小是b_size，所以块在内存中的起始位置是b_data，结束位置是b_data+b_size
+	/*
+	 * buffer_head中的b_data指向对应的缓冲区地址。注意：如果page是high mem,b_data
+	 * 存放的缓冲区业内的偏移量，比如第一个缓冲区b_data = 0，第二个是1K，第三个是2K。
+	 * 如果page在非high mem，b_data指向对应缓冲区的虚拟地址。
+	 */
 	char *b_data;			/* pointer to data within the page */
-
+	
+	// 相关联的块设备
 	struct block_device *b_bdev;
+	// I/O完成方法
 	bh_end_io_t *b_end_io;		/* I/O completion */
+	// 为 b_end_io 保留的私有数据
  	void *b_private;		/* reserved for b_end_io */
+	// 相关的映射链表
 	struct list_head b_assoc_buffers; /* associated with another mapping */
+	// 相关的地址空间
 	struct address_space *b_assoc_map;	/* mapping this buffer is
 						   associated with */
+	// 缓冲区使用计数，通过get_bh和put_bh增加或减少引用计数。
 	atomic_t b_count;		/* users using this buffer_head */
 };
 
@@ -249,11 +297,13 @@ static inline void attach_page_buffers(struct page *page,
 	set_page_private(page, (unsigned long)head);
 }
 
+// 缓冲区使用计数，通过get_bh增加引用计数。
 static inline void get_bh(struct buffer_head *bh)
 {
         atomic_inc(&bh->b_count);
 }
 
+// 缓冲区使用计数，通过put_bh减少引用计数。
 static inline void put_bh(struct buffer_head *bh)
 {
         smp_mb__before_atomic_dec();

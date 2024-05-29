@@ -1,6 +1,8 @@
 /*
  * elevator noop
  */
+
+// 空操作的I/O调度程序
 #include <linux/blkdev.h>
 #include <linux/elevator.h>
 #include <linux/bio.h>

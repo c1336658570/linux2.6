@@ -3,6 +3,8 @@
  *
  *  Copyright (C) 2002 Jens Axboe <axboe@kernel.dk>
  */
+
+// 最后期限I/O调度程序
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/blkdev.h>

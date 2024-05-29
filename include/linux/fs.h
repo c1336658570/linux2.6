@@ -1534,9 +1534,9 @@ struct file_operations {
 	ssize_t (*read) (struct file *, char __user *, size_t, loff_t *);
 	 // 从给定buf中取出count字节数据，写入给定文件的offset偏移处，更新文件指针，由系统调用write()调用
 	ssize_t (*write) (struct file *, const char __user *, size_t, loff_t *);
-	// 从给定文件，以同步方式读取count字节的数据到buf中，由系统调用aio_read()调用
+	// 从给定文件，以异步方式读取count字节的数据到buf中，由系统调用aio_read()调用
 	ssize_t (*aio_read) (struct kiocb *, const struct iovec *, unsigned long, loff_t);
-	// 以同步方式从给定buf中取出count字节数据，写入由iocb描述的文件中，由系统调用aio_write()调用
+	// 以异步方式从给定buf中取出count字节数据，写入由iocb描述的文件中，由系统调用aio_write()调用
 	ssize_t (*aio_write) (struct kiocb *, const struct iovec *, unsigned long, loff_t);
 	// 返回目录列表中的下一个目录，由系统调用readdir()调用
 	int (*readdir) (struct file *, void *, filldir_t);

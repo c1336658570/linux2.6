@@ -6,6 +6,8 @@
  *
  *  Copyright (C) 2003 Jens Axboe <axboe@kernel.dk>
  */
+
+// 完全公正的排队I/O调度程序
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/blkdev.h>

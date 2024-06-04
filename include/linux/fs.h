@@ -1400,6 +1400,7 @@ struct super_block {
 
 	char s_id[32];				/* Informational name */	/* 文本名字 */
 
+	// 指向指定文件系统的super_block比如，ext4_sb_info
 	void 			*s_fs_info;	/* Filesystem private info */	/* 文件系统特殊信息 */
 	fmode_t			s_mode;		/* 安装权限 */
 
@@ -1920,6 +1921,10 @@ void put_super(struct super_block *sb);
 #define fops_put(fops) \
 	do { if (fops) module_put((fops)->owner); } while(0)
 
+// 注册和取消注册文件系统
+// struct file_system_type 描述了您的文件系统。当请求将文件系统挂载到命名空间中的目录时，
+// VFS 将为特定文件系统调用适当的 mount() 方法。引用 ->mount() 返回的树的新 vfsmount 
+// 将附加到挂载点，以便当路径名解析到达挂载点时，它将跳转到该 vfsmount 的根。
 extern int register_filesystem(struct file_system_type *);
 extern int unregister_filesystem(struct file_system_type *);
 extern struct vfsmount *kern_mount_data(struct file_system_type *, void *data);

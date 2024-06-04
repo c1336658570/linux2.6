@@ -672,7 +672,7 @@ struct ext4_inode_info {
 	 * by other means, so we have i_data_sem.
 	 */
 	struct rw_semaphore i_data_sem;
-	struct inode vfs_inode;
+	struct inode vfs_inode;		// 一个vfs_inode节点
 	struct jbd2_inode jinode;
 
 	struct ext4_ext_cache i_cached_extent;

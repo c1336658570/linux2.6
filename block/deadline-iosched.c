@@ -440,6 +440,7 @@ static struct elv_fs_entry deadline_attrs[] = {
 	__ATTR_NULL
 };
 
+// 定义deadline IO 调度
 static struct elevator_type iosched_deadline = {
 	.ops = {
 		.elevator_merge_fn = 		deadline_merge,

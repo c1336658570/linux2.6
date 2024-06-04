@@ -158,6 +158,7 @@ struct dentry {
 	// 将该目录下的所有文件连接在一起，目的是保留文件的目录结构，即一个d_subdirs和
 	// 多个d_child一起形成链表，d_subdirs对应文件在d_child对应文件的上一层目录。
 	struct list_head d_subdirs;	/* our children */		/* 子目录链表 */
+	// d_alias会插入到对应inode的i_dentry链表中
 	struct list_head d_alias;	/* inode alias list */	/* 索引节点别名链表 */
 	unsigned long d_time;		/* used by d_revalidate */	/* 重置时间 */
 	// 指向dentry对应的操作函数集

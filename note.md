@@ -105,3 +105,6 @@ M       include/linux/quota.h
 M       include/linux/sched.h
 M       include/linux/writeback.h
 M       kernel/futex.c
+
+M       include/linux/fs.h
+M       mm/filemap.c

@@ -613,36 +613,51 @@ void __lock_page_nosync(struct page *page)
  * Is there a pagecache struct page at the given (mapping, offset) tuple?
  * If yes, increment its refcount and return it; if no, return NULL.
  */
+/**
+ * find_get_page - 查找并获取一个页面引用
+ * @mapping: 要搜索的地址空间
+ * @offset: 页面索引
+ *
+ * 在给定的 (mapping, offset) 元组中是否存在一个页面缓存的 struct page？
+ * 如果存在，增加其引用计数并返回它；如果不存在，返回 NULL。
+ */
+// mapping是指定地址空间，offset是文件中的指定位置，以页面为单位
 struct page *find_get_page(struct address_space *mapping, pgoff_t offset)
 {
-	void **pagep;
-	struct page *page;
+	void **pagep;		// 用于指向基数树槽位的指针
+	struct page *page;	// 用于存放找到的页面指针
 
-	rcu_read_lock();
+	rcu_read_lock();	// 开始一个读取者区域，用于RCU同步
 repeat:
 	page = NULL;
+	// 在基数树中查找给定偏移量的槽位
 	pagep = radix_tree_lookup_slot(&mapping->page_tree, offset);
-	if (pagep) {
+	if (pagep) {	// 如果找到槽位
+	// 解引用槽位以获取页面指针
 		page = radix_tree_deref_slot(pagep);
 		if (unlikely(!page || page == RADIX_TREE_RETRY))
-			goto repeat;
+			goto repeat;	// 如果页面指针无效或需要重试，则重复查找
 
 		if (!page_cache_get_speculative(page))
-			goto repeat;
+			goto repeat;	// 如果无法增加页面的引用计数，则重复查找
 
 		/*
 		 * Has the page moved?
 		 * This is part of the lockless pagecache protocol. See
 		 * include/linux/pagemap.h for details.
 		 */
-		if (unlikely(page != *pagep)) {
-			page_cache_release(page);
+		/*
+		 * 页面是否已移动？
+		 * 这是无锁页面缓存协议的一部分。详细信息见 include/linux/pagemap.h。
+		 */
+		if (unlikely(page != *pagep)) {	// 检查页面指针是否与槽位中的指针不一致
+			page_cache_release(page);	// 释放页面引用
 			goto repeat;
 		}
 	}
-	rcu_read_unlock();
+	rcu_read_unlock();	// 结束RCU读取者区域
 
-	return page;
+	return page;	// 返回找到的页面，或NULL
 }
 EXPORT_SYMBOL(find_get_page);
 

@@ -1566,6 +1566,10 @@ get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
 EXPORT_SYMBOL(get_unmapped_area);
 
 /* Look up the first VMA which satisfies  addr < vm_end,  NULL if none. */
+/* 查找第一个满足 addr < vm_end 的 VMA，如果没有则为 NULL。 */
+// 搜索第一个vm_end > addr的内存区域，没找到返回NULL，否则返回vm_area_struct。
+// 由于返回的vm_area_struct的首地址可能大于addr，所以指定的地址不一定包含在返回的VMA中。
+// 因为对返回的vm_area_struct可能执行其他操作，所以find_vma返回的结果被缓存在mm_struct的mmap_cache域中
 struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 {
 	struct vm_area_struct *vma = NULL;
@@ -1573,6 +1577,8 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 	if (mm) {
 		/* Check the cache first. */
 		/* (Cache hit rate is typically around 35%.) */
+		/*首先检查缓存。*/
+		/*（缓存命中率通常在 35% 左右。）*/
 		vma = mm->mmap_cache;
 		if (!(vma && vma->vm_end > addr && vma->vm_start <= addr)) {
 			struct rb_node * rb_node;
@@ -1580,6 +1586,7 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 			rb_node = mm->mm_rb.rb_node;
 			vma = NULL;
 
+			// 便利红黑树
 			while (rb_node) {
 				struct vm_area_struct * vma_tmp;
 
@@ -1594,6 +1601,7 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 				} else
 					rb_node = rb_node->rb_right;
 			}
+			// 找到了
 			if (vma)
 				mm->mmap_cache = vma;
 		}
@@ -1604,8 +1612,9 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 EXPORT_SYMBOL(find_vma);
 
 /* Same as find_vma, but also return a pointer to the previous VMA in *pprev. */
-struct vm_area_struct *
-find_vma_prev(struct mm_struct *mm, unsigned long addr,
+/* 与 find_vma 相同，但也返回指向 *pprev 中前一个 VMA 的指针。 */
+// 返回第一个小于addr的VMA。pprev参数存放指向先于addr的VMA指针
+struct vm_area_struct *find_vma_prev(struct mm_struct *mm, unsigned long addr,
 			struct vm_area_struct **pprev)
 {
 	struct vm_area_struct *vma = NULL, *prev = NULL;
@@ -1614,6 +1623,7 @@ find_vma_prev(struct mm_struct *mm, unsigned long addr,
 		goto out;
 
 	/* Guard against addr being lower than the first VMA */
+	/* 防止addr低于第一个VMA */
 	vma = mm->mmap;
 
 	/* Go through the RB tree quickly. */
@@ -2010,6 +2020,8 @@ int split_vma(struct mm_struct *mm, struct vm_area_struct *vma,
  * work.  This now handles partial unmappings.
  * Jeremy Fitzhardinge <jeremy@goop.org>
  */
+// 从特定的进程地址空间中删除指定地址区间
+// 第一个参数指定要删除区域所在的地址空间，删除地址从start开始，共len个字节。成功返回0,失败返回负的错误码
 int do_munmap(struct mm_struct *mm, unsigned long start, size_t len)
 {
 	unsigned long end;

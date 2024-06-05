@@ -437,6 +437,7 @@ static inline void mm_free_pgd(struct mm_struct * mm)
 
 __cacheline_aligned_in_smp DEFINE_SPINLOCK(mmlist_lock);
 
+// 从mm_cachep的slab中分配一个mm_struct
 #define allocate_mm()	(kmem_cache_alloc(mm_cachep, GFP_KERNEL))
 #define free_mm(mm)	(kmem_cache_free(mm_cachep, (mm)))
 
@@ -496,6 +497,7 @@ struct mm_struct * mm_alloc(void)
 {
 	struct mm_struct * mm;
 
+	// 从mm_cachep的slab中分配一个mm_struct
 	mm = allocate_mm();
 	if (mm) {
 		memset(mm, 0, sizeof(*mm));
@@ -522,6 +524,8 @@ EXPORT_SYMBOL_GPL(__mmdrop);
 /*
  * Decrement the use count and release all resources for an mm.
  */
+// 减少内存描述符中的mm_users用户计数，如果用户计数降为0将调用mmdrop函数，减少mm_count计数
+// 如果mm_count也为0,将调用free_mm，free_mm宏通过kmem_cache_free将内存还给mm_cachep 的slab
 void mmput(struct mm_struct *mm)
 {
 	might_sleep();
@@ -647,6 +651,7 @@ struct mm_struct *dup_mm(struct task_struct *tsk)
 	if (!oldmm)
 		return NULL;
 
+	// 从mm_cachep的slab中分配一个mm_struct
 	mm = allocate_mm();
 	if (!mm)
 		goto fail_nomem;
@@ -695,6 +700,7 @@ fail_nocontext:
 	return NULL;
 }
 
+// 复制进程的内存描述符
 static int copy_mm(unsigned long clone_flags, struct task_struct * tsk)
 {
 	struct mm_struct * mm, *oldmm;
@@ -719,6 +725,7 @@ static int copy_mm(unsigned long clone_flags, struct task_struct * tsk)
 		return 0;
 
 	if (clone_flags & CLONE_VM) {
+		// 存在CLONE_VM标志时，不需要调用allocate_mm分配mm_struct函数，只需要将oldmm的mm_users加1,并赋值给新进程即可。
 		atomic_inc(&oldmm->mm_users);
 		mm = oldmm;
 		goto good_mm;
@@ -1144,6 +1151,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		goto bad_fork_cleanup_fs;
 	if ((retval = copy_signal(clone_flags, p)))
 		goto bad_fork_cleanup_sighand;
+	// 复制进程的内存描述符
 	if ((retval = copy_mm(clone_flags, p)))
 		goto bad_fork_cleanup_signal;
 	if ((retval = copy_namespaces(clone_flags, p)))

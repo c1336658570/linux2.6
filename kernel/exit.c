@@ -711,6 +711,8 @@ static void exit_mm(struct task_struct * tsk)
 	clear_freeze_flag(tsk);
 	task_unlock(tsk);
 	mm_update_next_owner(mm);
+	// 减少内存描述符中的mm_users用户计数，如果用户计数降为0将调用mmdrop函数，减少mm_count计数
+	// 如果mm_count也为0,将调用free_mm，free_mm宏通过kmem_cache_free将内存还给mm_cachep 的slab
 	mmput(mm);
 }
 

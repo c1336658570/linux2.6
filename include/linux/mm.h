@@ -66,17 +66,20 @@ extern unsigned int kobjsize(const void *objp);
 /*
  * vm_flags in vm_area_struct, see mm_types.h.
  */
+// 页面可读，可写，可执行，可共享
 #define VM_READ		0x00000001	/* currently active flags */
 #define VM_WRITE	0x00000002
 #define VM_EXEC		0x00000004
 #define VM_SHARED	0x00000008
 
 /* mprotect() hardcodes VM_MAYREAD >> 4 == VM_READ, and so for r/w/x bits. */
+// 分别是VM_READ、VM_WRITE、VM_EXEC、VM_SHARED可被设置
 #define VM_MAYREAD	0x00000010	/* limits for mprotect() etc */
 #define VM_MAYWRITE	0x00000020
 #define VM_MAYEXEC	0x00000040
 #define VM_MAYSHARE	0x00000080
 
+// 区域向下增长，区域向上增长
 #define VM_GROWSDOWN	0x00000100	/* general info on the segment */
 #define VM_GROWSUP	0x00000200
 #define VM_PFNMAP	0x00000400	/* Page-ranges managed without "struct page", just pure PFN */
@@ -84,14 +87,17 @@ extern unsigned int kobjsize(const void *objp);
 
 #define VM_EXECUTABLE	0x00001000
 #define VM_LOCKED	0x00002000
+// 区域映射设备I/O空间
 #define VM_IO           0x00004000	/* Memory mapped I/O or similar */
 
 					/* Used by sys_madvise() */
+// 表示应用程序是顺序和随机读，用来提醒内核是否进行文件预读
 #define VM_SEQ_READ	0x00008000	/* App will access data sequentially */
 #define VM_RAND_READ	0x00010000	/* App will not benefit from clustered reads */
 
 #define VM_DONTCOPY	0x00020000      /* Do not copy this vma on fork */
 #define VM_DONTEXPAND	0x00040000	/* Cannot expand with mremap() */
+// 表示内存区域不能被换出，是设备驱动程序进行映射时设置的
 #define VM_RESERVED	0x00080000	/* Count as reserved_vm like IO */
 #define VM_ACCOUNT	0x00100000	/* Is a VM accounted object */
 #define VM_NORESERVE	0x00200000	/* should the VM suppress accounting */
@@ -165,11 +171,25 @@ static inline int is_pfn_mapping(struct vm_area_struct *vma)
  * is used, one may set VM_CAN_NONLINEAR in the vma->vm_flags to get nonlinear
  * mapping support.
  */
+/*
+ * vm_fault 结构体由页面错误处理程序填充，并传递给 VMA 的 ->fault 函数。
+ * VMA 的 ->fault 函数负责返回一个包含 VM_FAULT_xxx 标志的位掩码，这些标志详细描述了错误是如何被处理的。
+ *
+ * 如果可能，应优先使用 pgoff 而不是 virtual_address。如果使用了 pgoff，可以在 vma->vm_flags 中设置 VM_CAN_NONLINEAR
+ * 来获取非线性映射支持。
+ */
 struct vm_fault {
+	/* FAULT_FLAG_xxx 标志 */
 	unsigned int flags;		/* FAULT_FLAG_xxx flags */
+	/* 基于 VMA 的逻辑页面偏移 */
 	pgoff_t pgoff;			/* Logical page offset based on vma */
+	/* 发生错误的虚拟地址 */
 	void __user *virtual_address;	/* Faulting virtual address */
 
+	/* ->fault 处理程序应返回页面在这里，
+	 * 除非设置了 VM_FAULT_NOPAGE
+	 * （也隐含了 VM_FAULT_ERROR）。
+	 */
 	struct page *page;		/* ->fault handlers should return a
 					 * page here, unless VM_FAULT_NOPAGE
 					 * is set (which is also implied by
@@ -182,18 +202,30 @@ struct vm_fault {
  * unmapping it (needed to keep files on disk up-to-date etc), pointer
  * to the functions called when a no-page or a wp-page exception occurs. 
  */
+/*
+ * 这些是虚拟内存管理函数 - 打开一个区域、关闭和取消映射它（需要保持磁盘上的文件最新等），
+ * 以及在发生无页面或写保护页面异常时调用的函数指针。
+ */
 struct vm_operations_struct {
+	// 当指定的内存区域被加入到一个地址空间时，该函数被调用。
 	void (*open)(struct vm_area_struct * area);
+	// 当指定的内存区域从地址空间删除时，该函数被调用。
 	void (*close)(struct vm_area_struct * area);
+	// 当没有出现在物理内存中的页面被访问时，该函数被页面故障处理调用。
 	int (*fault)(struct vm_area_struct *vma, struct vm_fault *vmf);
 
 	/* notification that a previously read-only page is about to become
 	 * writable, if an error is returned it will cause a SIGBUS */
+	/* 通知之前只读的页面即将变为可写，如果返回错误，将导致SIGBUS信号 */
+	// 当某个页面是只读页面时，该函数被页面故障处理调用。
 	int (*page_mkwrite)(struct vm_area_struct *vma, struct vm_fault *vmf);
 
 	/* called by access_process_vm when get_user_pages() fails, typically
 	 * for use by special VMAs that can switch between memory and hardware
 	 */
+	/* 当 get_user_pages() 失败时由 access_process_vm 调用，
+	 * 通常用于特殊的 VMAs，可以在内存和硬件之间切换 */
+	// 当 get_user_pages 调用失败时，该函数被 access_process_vm 函数调用。
 	int (*access)(struct vm_area_struct *vma, unsigned long addr,
 		      void *buf, int len, int write);
 #ifdef CONFIG_NUMA
@@ -203,6 +235,11 @@ struct vm_operations_struct {
 	 * remove a policy and fall back to surrounding context--i.e. do not
 	 * install a MPOL_DEFAULT policy, nor the task or system default
 	 * mempolicy.
+	 */
+	/*
+	 * set_policy() 操作必须在返回时增加对任何非空 @new mempolicy 的引用，
+	 * 以保持策略。调用者应传递 NULL @new 来移除策略，回退到周围的上下文，
+	 * 即不安装 MPOL_DEFAULT 策略，也不使用任务或系统默认的内存策略。
 	 */
 	int (*set_policy)(struct vm_area_struct *vma, struct mempolicy *new);
 
@@ -215,6 +252,13 @@ struct vm_operations_struct {
 	 * If no [shared/vma] mempolicy exists at the addr, get_policy() op
 	 * must return NULL--i.e., do not "fallback" to task or system default
 	 * policy.
+	 */
+	/*
+	 * get_policy() 操作必须在 (vma, addr) 处的策略标记为 MPOL_SHARED 时增加引用 [mpol_get()]。
+	 * 在 mm/mempolicy.c 中的共享策略基础设施将自动完成这一点。
+	 * 如果在 (vma, addr) 的策略未标记为 MPOL_SHARED，get_policy() 不能增加引用。
+	 * VMA 策略由 mmap_sem 保护。如果在地址处没有 [共享/VMA] 内存策略，
+	 * get_policy() 操作必须返回 NULL — 即，不要 "fallback" 到任务或系统默认策略。
 	 */
 	struct mempolicy *(*get_policy)(struct vm_area_struct *vma,
 					unsigned long addr);
@@ -1268,6 +1312,32 @@ extern unsigned long mmap_region(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long flags,
 	unsigned int vm_flags, unsigned long pgoff);
 
+// 内核使用该函数创建一个新的线性地址空间。如果一个新的地址空间与一个已经存在的地址空间相邻，
+// 并且具有相同权限，俩区间将会合并。如果不能合并，才真正创建一个新的。
+// file指定文件，具体文件偏移从offset开始，长度为len字节。如果file是NULL并且offset是0，
+// 那么就代表这次映射没有和文件相关，这种情况称为匿名映射。如果指定文件和偏移就称为文件映射。
+// addr是可选参数，指定搜索空闲区域的起始地址。
+// prot参数指定内存区域中页面的访问权限。权限在asm/mman.h中。不同体系结构定义不同。
+// PROT_READ		对应VM_READ
+// PROT_WRITE		对应VM_WRITE
+// PROT_EXEC		对应VM_EXEC
+// PROT_NONE		不可访问
+// flag参数指定VMA的标志，这些标志指定类型并改变映射行文。在asm/mman.h中定义
+// MAP_SHARED				映射可被共享
+// MAP_PRIVATE			映射不能被共享
+// MAP_FIXED				新区间必须开始于指定的地址addr
+// MAP_ANONYMOUS		映射不是file-backed的，而是匿名的
+// MAP_GROWSDOWN		对应于VM_GROWSDOWN
+// MAP_DENYWRITE		对应于VM_DENYWRITE
+// MAP_EXECUTABLE		对应于VM_EXECUTABLE
+// MAP_LOCKED				对应于VM_LOCKED
+// MAP_NORESERVE		不需要为映射保留空间
+// MAP_POPULATE			填充页表
+// MAP_NONBLOCK			在I/O操作上不堵塞
+// 如果系统调用do_map中存在无效参数，那么返回一个负值。否则会在虚拟内存中分配一个合适的新区域
+// 新区域会和邻近区域合并，否则内核从vm_area_cachep中分配一个新的vm_area_struct
+// 并使用vma_link将新分配的内存区域添加到地址空间的内存区域链表和红黑树中，随后更新内存描述符的total_mm域。
+// 然后返回新分配的地址空间的初始地址。
 static inline unsigned long do_mmap(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
 	unsigned long flag, unsigned long offset)
@@ -1281,6 +1351,8 @@ out:
 	return ret;
 }
 
+// 从特定的进程地址空间中删除指定地址区间
+// 第一个参数指定要删除区域所在的地址空间，删除地址从start开始，共len个字节。成功返回0,失败返回负的错误码
 extern int do_munmap(struct mm_struct *, unsigned long, size_t);
 
 extern unsigned long do_brk(unsigned long, unsigned long);
@@ -1332,12 +1404,22 @@ extern int expand_stack_downwards(struct vm_area_struct *vma,
 				  unsigned long address);
 
 /* Look up the first VMA which satisfies  addr < vm_end,  NULL if none. */
+/* 查找第一个满足 addr < vm_end 的 VMA，如果没有则为 NULL。 */
+// 搜索第一个vm_end > addr的内存区域，没找到返回NULL，否则返回vm_area_struct。
+// 由于返回的vm_area_struct的首地址可能大于addr，所以指定的地址不一定包含在返回的VMA中。
+// 因为对返回的vm_area_struct可能执行其他操作，所以find_vma返回的结果被缓存在mm_struct的mmap_cache域中
 extern struct vm_area_struct * find_vma(struct mm_struct * mm, unsigned long addr);
+/* 与 find_vma 相同，但也返回指向 *pprev 中前一个 VMA 的指针。 */
+// 返回第一个小于addr的VMA。pprev参数存放指向先于addr的VMA指针
 extern struct vm_area_struct * find_vma_prev(struct mm_struct * mm, unsigned long addr,
 					     struct vm_area_struct **pprev);
 
 /* Look up the first VMA which intersects the interval start_addr..end_addr-1,
    NULL if none.  Assume start_addr < end_addr. */
+/*查找与区间start_addr..end_addr-1相交的第一个VMA，
+如果没有则为 NULL。  假设起始地址 < 结束地址。*/
+// 返回第一个和指定地址区间相交的VMA。mm是要搜索的地址空间，
+// start_addr是区间开始的首地址，end_addr是区间尾地址
 static inline struct vm_area_struct * find_vma_intersection(struct mm_struct * mm, unsigned long start_addr, unsigned long end_addr)
 {
 	struct vm_area_struct * vma = find_vma(mm,start_addr);

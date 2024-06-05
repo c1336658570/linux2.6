@@ -1230,6 +1230,8 @@ struct task_struct {
 	// list_entry(task->tasks.next/task->tasks.prev, struct task_struct, tasks);		// 获取前/后一个进程
 	struct plist_node pushable_tasks;
 
+	// mm指向当前进程的内存描述符
+	// active_mm是内核线程用的，内核线程mm为NULL，active_mm指向前一个进程的mm_struct
 	struct mm_struct *mm, *active_mm;
 #if defined(SPLIT_RSS_COUNTING)
 	struct task_rss_stat	rss_stat;

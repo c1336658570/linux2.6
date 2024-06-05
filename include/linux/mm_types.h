@@ -175,16 +175,30 @@ struct page {
  * conditions.  These are held in a global tree and are pinned by the VMAs that
  * map parts of them.
  */
+/*
+ * vm_region 结构描述在无MMU条件下映射非内存后备文件的区域。
+ * 这些区域在全局树中维护，并且被映射它们部分的 VMA 所固定。
+ */
+
 struct vm_region {
+	/* 链接到全球区域树 */
 	struct rb_node	vm_rb;		/* link in global region tree */
+	/* VMA vm_flags */
 	unsigned long	vm_flags;	/* VMA vm_flags */
+	/* 区域的起始地址 */
 	unsigned long	vm_start;	/* start address of region */
+	/* 区域初始化到这里 */
 	unsigned long	vm_end;		/* region initialised to here */
+	/* 区域分配到这里 */
 	unsigned long	vm_top;		/* region allocated to here */
+	/* vm_file中对应vm_start的偏移 */
 	unsigned long	vm_pgoff;	/* the offset in vm_file corresponding to vm_start */
+	/* 后备文件或NULL */
 	struct file	*vm_file;	/* the backing file or NULL */
 
+	/* 区域使用计数（在 nommu_region_sem 下访问） */
 	int		vm_usage;	/* region usage count (access under nommu_region_sem) */
+	/* 如果为此区域刷新了指令缓存，则为true */
 	bool		vm_icache_flushed : 1; /* true if the icache has been flushed for
 						* this region */
 };
@@ -195,18 +209,29 @@ struct vm_region {
  * space that has a special rule for the page-fault handlers (ie a shared
  * library, the executable area etc).
  */
+/*
+ * 这个结构定义了一个内存 VMM 内存区域。每个VM区域/任务有一个这样的结构。
+ * VM区域是进程虚拟内存空间的任何部分，它对页面错误处理程序有特殊规则（例如共享库、可执行区域等）。
+ */
 struct vm_area_struct {
+	// 相关的mm_struct
 	struct mm_struct * vm_mm;	/* The address space we belong to. */
+	// 区间的首地址
 	unsigned long vm_start;		/* Our start address within vm_mm. */
+	// 区间的尾地址
 	unsigned long vm_end;		/* The first byte after our end address
 					   within vm_mm. */
 
 	/* linked list of VM areas per task, sorted by address */
-	struct vm_area_struct *vm_next;
+	/* 每个任务的 VM 区域的链表，按地址排序 */
+	struct vm_area_struct *vm_next;	// VMA 链表
 
+	// 访问控制权限
 	pgprot_t vm_page_prot;		/* Access permissions of this VMA. */
+	// 标志，在mm.h中
 	unsigned long vm_flags;		/* Flags, see mm.h. */
 
+	// 红黑树上该VMA节点
 	struct rb_node vm_rb;
 
 	/*
@@ -216,6 +241,7 @@ struct vm_area_struct {
 	 * linkage of vma in the address_space->i_mmap_nonlinear list.
 	 */
 	union {
+		// 要么关联address_space->i_mmap字段，要么关联address_space->i_mmap_nonlinear字段。
 		struct {
 			struct list_head list;
 			void *parent;	/* aligns with prio_tree_node parent */
@@ -231,17 +257,23 @@ struct vm_area_struct {
 	 * can only be in the i_mmap tree.  An anonymous MAP_PRIVATE, stack
 	 * or brk vma (with NULL file) can only be in an anon_vma list.
 	 */
+	// anon_vma项
 	struct list_head anon_vma_chain; /* Serialized by mmap_sem &
 					  * page_table_lock */
+	// 匿名 VMA 对象
 	struct anon_vma *anon_vma;	/* Serialized by page_table_lock */
 
 	/* Function pointers to deal with this struct. */
+	// 相关的操作表
 	const struct vm_operations_struct *vm_ops;
 
 	/* Information about our backing store: */
+	// 文件中的偏移量
 	unsigned long vm_pgoff;		/* Offset (within vm_file) in PAGE_SIZE
 					   units, *not* PAGE_CACHE_SIZE */
+	// 被映射的文件
 	struct file * vm_file;		/* File we map to (can be NULL). */
+	// 私有数据
 	void * vm_private_data;		/* was vm_pte (shared mem) */
 	unsigned long vm_truncate_count;/* truncate_count or restart_addr */
 
@@ -253,43 +285,59 @@ struct vm_area_struct {
 #endif
 };
 
+/* 核心线程结构，用于管理任务和线程列表 */
 struct core_thread {
+	// 指向任务结构的指针
 	struct task_struct *task;
+	// 指向下一个核心线程的指针
 	struct core_thread *next;
 };
 
+/* 核心状态结构，用于同步线程启动和跟踪线程数量 */
 struct core_state {
+	// 原子操作的线程数
 	atomic_t nr_threads;
+	// dumper线程
 	struct core_thread dumper;
+	// 启动同步结构
 	struct completion startup;
 };
 
+/* 内存计数器枚举，用于分类不同类型的内存页 */
 enum {
-	MM_FILEPAGES,
-	MM_ANONPAGES,
-	MM_SWAPENTS,
-	NR_MM_COUNTERS
+	MM_FILEPAGES,		// 文件映射页
+	MM_ANONPAGES,		// 匿名页
+	MM_SWAPENTS,		// 交换空间实体
+	NR_MM_COUNTERS	// 计数器总数
 };
 
 #if USE_SPLIT_PTLOCKS && defined(CONFIG_MMU)
 #define SPLIT_RSS_COUNTING
+/* 多线程安全的内存统计结构 */
 struct mm_rss_stat {
-	atomic_long_t count[NR_MM_COUNTERS];
+	atomic_long_t count[NR_MM_COUNTERS];	// 使用原子长整型进行计数
 };
 /* per-thread cached information, */
+/* 每线程缓存的内存统计信息 */
 struct task_rss_stat {
+	// 同步阈值事件数
 	int events;	/* for synchronization threshold */
+	// 内存计数
 	int count[NR_MM_COUNTERS];
 };
 #else  /* !USE_SPLIT_PTLOCKS */
+/* 未使用分离页表锁时的内存统计结构 */
 struct mm_rss_stat {
-	unsigned long count[NR_MM_COUNTERS];
+	unsigned long count[NR_MM_COUNTERS];	// 内存计数
 };
 #endif /* !USE_SPLIT_PTLOCKS */
 
+/* 内存管理结构，每个进程有一个 */
 struct mm_struct {
+	// 内存区域链表
 	struct vm_area_struct * mmap;		/* list of VMAs */
-	struct rb_root mm_rb;
+	struct rb_root mm_rb;		// VMA形成的红黑树
+	// 最近使用的内存区域
 	struct vm_area_struct * mmap_cache;	/* last find_vma result */
 #ifdef CONFIG_MMU
 	unsigned long (*get_unmapped_area) (struct file *filp,
@@ -297,46 +345,62 @@ struct mm_struct {
 				unsigned long pgoff, unsigned long flags);
 	void (*unmap_area) (struct mm_struct *mm, unsigned long addr);
 #endif
+	// 内存映射基地址
 	unsigned long mmap_base;		/* base of mmap area */
+	// 进程虚拟内存大小
 	unsigned long task_size;		/* size of task vm space */
+	// 缓存的最大空洞大小
 	unsigned long cached_hole_size; 	/* if non-zero, the largest hole below free_area_cache */
+	// 地址空间的第一个空洞
 	unsigned long free_area_cache;		/* first hole of size cached_hole_size or larger */
-	pgd_t * pgd;
+	// 页全局目录
+	pgd_t * pgd;	// 指向进程的页全局目录
+	// 使用地址空间的用户数
 	atomic_t mm_users;			/* How many users with user space? */
+	// 主使用计数器
 	atomic_t mm_count;			/* How many references to "struct mm_struct" (users count as 1) */
+	// 内存区域的个数
 	int map_count;				/* number of VMAs */
+	// 内存区域的信号量
 	struct rw_semaphore mmap_sem;
+	// 页表锁，操作和检索页表时必须使用该锁。
 	spinlock_t page_table_lock;		/* Protects page tables and some counters */
 
+	// 所有mm_struct形成的链表
 	struct list_head mmlist;		/* List of maybe swapped mm's.	These are globally strung
 						 * together off init_mm.mmlist, and are protected
 						 * by mmlist_lock
 						 */
 
-
-	unsigned long hiwater_rss;	/* High-watermark of RSS usage */
-	unsigned long hiwater_vm;	/* High-water virtual memory usage */
-
+	// 所分配的物理页
+	unsigned long hiwater_rss;	/* High-watermark of RSS usage */	// 最高水位线的常驻集大小
+	unsigned long hiwater_vm;	/* High-water virtual memory usage */	// 最高虚拟内存使用量
+	// 全部页面数和上锁页面数
 	unsigned long total_vm, locked_vm, shared_vm, exec_vm;
 	unsigned long stack_vm, reserved_vm, def_flags, nr_ptes;
+	// 代码段开始和结束，数据段的首位地址
 	unsigned long start_code, end_code, start_data, end_data;
+	// 堆的首尾地址，进程栈的首地址
 	unsigned long start_brk, brk, start_stack;
+	// 命令行参数的首尾地址，环境变量的首尾地址
 	unsigned long arg_start, arg_end, env_start, env_end;
 
+	// 所保存的auxv
 	unsigned long saved_auxv[AT_VECTOR_SIZE]; /* for /proc/PID/auxv */
 
 	/*
 	 * Special counters, in some configurations protected by the
 	 * page_table_lock, in other configurations by being atomic.
 	 */
-	struct mm_rss_stat rss_stat;
+	struct mm_rss_stat rss_stat;	// 内存统计信息
 
-	struct linux_binfmt *binfmt;
+	struct linux_binfmt *binfmt;	// 二进制格式信息
 
+	// 懒惰的TLB交换掩码
 	cpumask_t cpu_vm_mask;
 
 	/* Architecture-specific MM context */
-	mm_context_t context;
+	mm_context_t context;	// 体系结构特殊数据
 
 	/* Swap token stuff */
 	/*
@@ -345,15 +409,19 @@ struct mm_struct {
 	 * it has been since this task got the token.
 	 * Look at mm/thrash.c
 	 */
-	unsigned int faultstamp;
-	unsigned int token_priority;
-	unsigned int last_interval;
+	unsigned int faultstamp;			// 最后一次错误时间戳
+	unsigned int token_priority;	// 令牌优先级
+	unsigned int last_interval;		// 最后间隔
 
+	// 状态标志
 	unsigned long flags; /* Must use atomic bitops to access the bits */
 
+	// 核心转储的支持
 	struct core_state *core_state; /* coredumping support */
 #ifdef CONFIG_AIO
+	// AIO I/O 链表锁
 	spinlock_t		ioctx_lock;
+	// AIO I/O 链表
 	struct hlist_head	ioctx_list;
 #endif
 #ifdef CONFIG_MM_OWNER
@@ -367,20 +435,21 @@ struct mm_struct {
 	 * new_owner->mm == mm
 	 * new_owner->alloc_lock is held
 	 */
-	struct task_struct *owner;
+	struct task_struct *owner;		// 内存管理结构的所有者
 #endif
 
 #ifdef CONFIG_PROC_FS
 	/* store ref to file /proc/<pid>/exe symlink points to */
-	struct file *exe_file;
-	unsigned long num_exe_file_vmas;
+	struct file *exe_file;							// proc/<pid>/exe 链接到的文件
+	unsigned long num_exe_file_vmas;		// exe文件关联的内存区数量
 #endif
 #ifdef CONFIG_MMU_NOTIFIER
-	struct mmu_notifier_mm *mmu_notifier_mm;
+	struct mmu_notifier_mm *mmu_notifier_mm;	// MMU通知器
 #endif
 };
 
 /* Future-safe accessor for struct mm_struct's cpu_vm_mask. */
+/* 安全访问 mm_struct 中的 cpu_vm_mask 的宏定义 */
 #define mm_cpumask(mm) (&(mm)->cpu_vm_mask)
 
 #endif /* _LINUX_MM_TYPES_H */

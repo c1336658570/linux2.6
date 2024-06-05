@@ -17,13 +17,18 @@
 
 #include <linux/types.h>
 
+/* kref 结构体用于引用计数 */
 struct kref {
-	atomic_t refcount;
+	atomic_t refcount;	// 使用原子操作的引用计数
 };
 
+/* 设置 kref 的引用计数 */
 void kref_set(struct kref *kref, int num);
+/* 初始化 kref 结构，设置引用计数为 1 */
 void kref_init(struct kref *kref);
+/* 增加 kref 的引用计数 */
 void kref_get(struct kref *kref);
+/* 减少 kref 的引用计数，并在引用计数为 0 时调用释放函数 */
 int kref_put(struct kref *kref, void (*release) (struct kref *kref));
 
 #endif /* _KREF_H_ */

@@ -14,30 +14,32 @@
 struct sysfs_open_dirent;
 
 /* type-specific structures for sysfs_dirent->s_* union members */
+/* 特定类型的结构体，用于 sysfs_dirent->s_* 联合成员 */
 struct sysfs_elem_dir {
-	struct kobject		*kobj;
+	struct kobject		*kobj;	// 指向 kobject 对象的指针
 	/* children list starts here and goes through sd->s_sibling */
-	struct sysfs_dirent	*children;
+	/* 子目录列表从这里开始，通过 sd->s_sibling 链接 */
+	struct sysfs_dirent	*children;	// 子目录项
 };
 
 struct sysfs_elem_symlink {
-	struct sysfs_dirent	*target_sd;
+	struct sysfs_dirent	*target_sd;	// 目标 sysfs_dirent 的符号链接
 };
 
 struct sysfs_elem_attr {
-	struct attribute	*attr;
-	struct sysfs_open_dirent *open;
+	struct attribute	*attr;		// 属性
+	struct sysfs_open_dirent *open;	// 打开的 dirent
 };
 
 struct sysfs_elem_bin_attr {
-	struct bin_attribute	*bin_attr;
-	struct hlist_head	buffers;
+	struct bin_attribute	*bin_attr;	// 二进制属性
+	struct hlist_head	buffers;	// 缓冲区链表头
 };
 
 struct sysfs_inode_attrs {
-	struct iattr	ia_iattr;
-	void		*ia_secdata;
-	u32		ia_secdata_len;
+	struct iattr	ia_iattr;	// inode 属性
+	void		*ia_secdata;		// 安全模块使用的数据
+	u32		ia_secdata_len;		// 安全数据的长度
 };
 
 /*
@@ -48,27 +50,33 @@ struct sysfs_inode_attrs {
  * accessible.  Dereferencing s_elem or any other outer entity
  * requires s_active reference.
  */
+/*
+ * sysfs_dirent - sysfs层级结构的构建块。每一个 sysfs 节点都由单个 sysfs_dirent 表示。
+ *
+ * 只要持有 s_count 引用，sysfs_dirent 本身就是可访问的。要解引用 s_elem 或任何其他外部实体，
+ * 需要 s_active 引用。
+ */
 struct sysfs_dirent {
-	atomic_t		s_count;
-	atomic_t		s_active;
+	atomic_t		s_count;		// 引用计数
+	atomic_t		s_active;		// 活跃引用计数
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
-	struct lockdep_map	dep_map;
+	struct lockdep_map	dep_map;	// 锁依赖映射，用于调试
 #endif
-	struct sysfs_dirent	*s_parent;
-	struct sysfs_dirent	*s_sibling;
-	const char		*s_name;
+	struct sysfs_dirent	*s_parent;	// 父目录项
+	struct sysfs_dirent	*s_sibling;	// 兄弟目录项
+	const char		*s_name;					// 目录项名称
 
 	union {
-		struct sysfs_elem_dir		s_dir;
-		struct sysfs_elem_symlink	s_symlink;
-		struct sysfs_elem_attr		s_attr;
-		struct sysfs_elem_bin_attr	s_bin_attr;
+		struct sysfs_elem_dir		s_dir;				// 目录类型
+		struct sysfs_elem_symlink	s_symlink;	// 符号链接类型
+		struct sysfs_elem_attr		s_attr;			// 属性类型
+		struct sysfs_elem_bin_attr	s_bin_attr;	// 二进制属性类型
 	};
 
-	unsigned int		s_flags;
-	unsigned short		s_mode;
-	ino_t			s_ino;
-	struct sysfs_inode_attrs *s_iattr;
+	unsigned int		s_flags;		// 标志
+	unsigned short		s_mode;		// 文件模式 (权限)
+	ino_t			s_ino;						// inode 号
+	struct sysfs_inode_attrs *s_iattr;	// inode 属性
 };
 
 #define SD_DEACTIVATED_BIAS		INT_MIN

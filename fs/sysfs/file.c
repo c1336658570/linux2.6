@@ -534,7 +534,8 @@ int sysfs_add_file(struct sysfs_dirent *dir_sd, const struct attribute *attr,
  *	@kobj:	object we're creating for. 
  *	@attr:	attribute descriptor.
  */
-
+// 创建新的属性，attr参数指向相应的attribute结构体，kobj指向属性所在的kobject对象
+// 成功返回0,失败返回负的错误码
 int sysfs_create_file(struct kobject * kobj, const struct attribute * attr)
 {
 	BUG_ON(!kobj || !kobj->sd || !attr);
@@ -621,7 +622,7 @@ EXPORT_SYMBOL_GPL(sysfs_chmod_file);
  *
  *	Hash the attribute name and kill the victim.
  */
-
+// 在sysfs中删除一个属性
 void sysfs_remove_file(struct kobject * kobj, const struct attribute * attr)
 {
 	sysfs_hash_and_remove(kobj->sd, attr->name);

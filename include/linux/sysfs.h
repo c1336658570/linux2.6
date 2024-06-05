@@ -26,13 +26,19 @@ struct module;
  * x86 tree has been cleaned up. The owner
  * attribute is still left for other arches.
  */
+/* FIXME
+ * *owner 字段已不再使用。
+ * x86 架构已经清理了此字段。但 owner
+ * 属性仍然保留在其他架构中。
+ */
 struct attribute {
-	const char		*name;
-	struct module		*owner;
-	mode_t			mode;
+	const char		*name;	// 属性的名称
+	// 所属模块（如果存在）
+	struct module		*owner;	// 指向拥有这个属性的模块的指针（在某些架构中已不再使用）
+	mode_t			mode;	// 属性的访问权限模式（如只读、只写、可执行等）
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
-	struct lock_class_key	*key;
-	struct lock_class_key	skey;
+	struct lock_class_key	*key;	// 锁类关键字，用于锁依赖检查
+	struct lock_class_key	skey;	// 另一个锁类关键字，用于同样的目的
 #endif
 };
 
@@ -112,8 +118,11 @@ struct bin_attribute {
  */
 #define sysfs_bin_attr_init(bin_attr) sysfs_attr_init(&(bin_attr)->attr)
 
+// 属性的操作
 struct sysfs_ops {
+	// 在读sysfs文件时该函数被调用
 	ssize_t	(*show)(struct kobject *, struct attribute *,char *);
+	// 在写sysfs文件时该函数被调用
 	ssize_t	(*store)(struct kobject *,struct attribute *,const char *, size_t);
 };
 
@@ -130,12 +139,15 @@ int __must_check sysfs_rename_dir(struct kobject *kobj, const char *new_name);
 int __must_check sysfs_move_dir(struct kobject *kobj,
 				struct kobject *new_parent_kobj);
 
+// 创建新的属性，attr参数指向相应的attribute结构体，kobj指向属性所在的kobject对象
+// 成功返回0,失败返回负的错误码
 int __must_check sysfs_create_file(struct kobject *kobj,
 				   const struct attribute *attr);
 int __must_check sysfs_create_files(struct kobject *kobj,
 				   const struct attribute **attr);
 int __must_check sysfs_chmod_file(struct kobject *kobj, struct attribute *attr,
 				  mode_t mode);
+// 在sysfs中删除一个属性
 void sysfs_remove_file(struct kobject *kobj, const struct attribute *attr);
 void sysfs_remove_files(struct kobject *kobj, const struct attribute **attr);
 
@@ -144,11 +156,13 @@ int __must_check sysfs_create_bin_file(struct kobject *kobj,
 void sysfs_remove_bin_file(struct kobject *kobj,
 			   const struct bin_attribute *attr);
 
+// 在sysfs中创建一个符号链接，符号链接名由name指定，链接由kobj指定的目录映射到target指定的目录
 int __must_check sysfs_create_link(struct kobject *kobj, struct kobject *target,
 				   const char *name);
 int __must_check sysfs_create_link_nowarn(struct kobject *kobj,
 					  struct kobject *target,
 					  const char *name);
+// 在sysfs中删除一个符号链接
 void sysfs_remove_link(struct kobject *kobj, const char *name);
 
 int sysfs_rename_link(struct kobject *kobj, struct kobject *target,
@@ -202,6 +216,8 @@ static inline int sysfs_move_dir(struct kobject *kobj,
 	return 0;
 }
 
+// 创建新的属性，attr参数指向相应的attribute结构体，kobj指向属性所在的kobject对象
+// 成功返回0,失败返回负的错误码
 static inline int sysfs_create_file(struct kobject *kobj,
 				    const struct attribute *attr)
 {
@@ -220,6 +236,7 @@ static inline int sysfs_chmod_file(struct kobject *kobj,
 	return 0;
 }
 
+// 在sysfs中删除一个属性
 static inline void sysfs_remove_file(struct kobject *kobj,
 				     const struct attribute *attr)
 {
@@ -241,6 +258,7 @@ static inline void sysfs_remove_bin_file(struct kobject *kobj,
 {
 }
 
+// 在sysfs中创建一个符号链接，符号链接名由name指定，链接由kobj指定的目录映射到target指定的目录
 static inline int sysfs_create_link(struct kobject *kobj,
 				    struct kobject *target, const char *name)
 {
@@ -254,6 +272,7 @@ static inline int sysfs_create_link_nowarn(struct kobject *kobj,
 	return 0;
 }
 
+// 在sysfs中删除一个符号链接
 static inline void sysfs_remove_link(struct kobject *kobj, const char *name)
 {
 }

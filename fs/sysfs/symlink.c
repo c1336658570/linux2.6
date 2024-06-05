@@ -85,6 +85,7 @@ static int sysfs_do_create_link(struct kobject *kobj, struct kobject *target,
  *	@target:	object we're pointing to.
  *	@name:		name of the symlink.
  */
+// 在sysfs中创建一个符号链接，符号链接名由name指定，链接由kobj指定的目录映射到target指定的目录
 int sysfs_create_link(struct kobject *kobj, struct kobject *target,
 		      const char *name)
 {
@@ -111,7 +112,7 @@ int sysfs_create_link_nowarn(struct kobject *kobj, struct kobject *target,
  *	@kobj:	object we're acting for.
  *	@name:	name of the symlink to remove.
  */
-
+// 在sysfs中删除一个符号链接
 void sysfs_remove_link(struct kobject * kobj, const char * name)
 {
 	struct sysfs_dirent *parent_sd = NULL;

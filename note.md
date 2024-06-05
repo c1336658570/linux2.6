@@ -108,3 +108,12 @@ M       kernel/futex.c
 
 M       include/linux/fs.h
 M       mm/filemap.c
+
+M       fs/sysfs/file.c
+M       fs/sysfs/symlink.c
+M       fs/sysfs/sysfs.h
+M       include/linux/cdev.h
+M       include/linux/kobject.h
+M       include/linux/kref.h
+M       include/linux/sysfs.h
+M       lib/kref.c

@@ -27,22 +27,43 @@
 #ifndef _LINUX_SRCU_H
 #define _LINUX_SRCU_H
 
+/*
+ * struct srcu_struct_array - 用于 SRCU 结构的辅助数组
+ * 每个处理器核心都有自己的计数器数组，以跟踪对 SRCU 保护的数据结构的读取次数。
+ */
 struct srcu_struct_array {
+	// 这是一个包含两个整数的数组，用于计算每个处理器核心的 SRCU 读取次数。
 	int c[2];
 };
 
+/*
+ * struct srcu_struct - 描述一个 SRCU 保护的数据结构。
+ * 这个结构提供了进行锁操作所需的所有元数据。
+ */
 struct srcu_struct {
+	// 一个计数器，用于跟踪已完成的 SRCU 更新周期。
 	int completed;
+	// 指向每个 CPU 的 srcu_struct_array 的指针，用于处理每个 CPU 的 SRCU 引用计数。
 	struct srcu_struct_array __percpu *per_cpu_ref;
+	// 一个互斥锁，用于同步对此 SRCU 结构的访问。
 	struct mutex mutex;
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
+	// 用于锁依赖性调试的结构。
 	struct lockdep_map dep_map;
 #endif /* #ifdef CONFIG_DEBUG_LOCK_ALLOC */
 };
 
 #ifndef CONFIG_PREEMPT
+/*
+ * srcu_barrier - 在非抢占配置中定义为简单的内存屏障。
+ * 用于确保编译器和硬件不会重排指令，从而确保 SRCU 读取和更新操作的顺序性。
+ */
 #define srcu_barrier() barrier()
 #else /* #ifndef CONFIG_PREEMPT */
+/*
+ * 在抢占配置中，srcu_barrier 定义为空操作。
+ * 在支持抢占的系统中，不需要额外的屏障来保持 SRCU 的顺序性，因为抢占本身会保证必要的同步和内存屏障。
+ */
 #define srcu_barrier()
 #endif /* #else #ifndef CONFIG_PREEMPT */
 

@@ -15,47 +15,68 @@
 
 #ifdef CONFIG_BLOCK
 
+// 宏定义，用于从 kobject 获得包含它的 device 结构体
 #define kobj_to_dev(k)		container_of((k), struct device, kobj)
+// 从 device 结构体获取 gendisk 结构体
 #define dev_to_disk(device)	container_of((device), struct gendisk, part0.__dev)
+// 从 device 结构体获取分区结构 hd_struct
 #define dev_to_part(device)	container_of((device), struct hd_struct, __dev)
+// 从 gendisk 结构体获取 device 结构体
 #define disk_to_dev(disk)	(&(disk)->part0.__dev)
+// 从分区结构 hd_struct 获取 device 结构体
 #define part_to_dev(part)	(&((part)->__dev))
 
-extern struct device_type part_type;
-extern struct kobject *block_depr;
-extern struct class block_class;
+// 对外部声明
+extern struct device_type part_type;  // 分区的设备类型
+extern struct kobject *block_depr;    // 块设备的弃用 kobject
+extern struct class block_class;      // 块设备的类
 
+// 分区类型枚举
 enum {
 /* These three have identical behaviour; use the second one if DOS FDISK gets
    confused about extended/logical partitions starting past cylinder 1023. */
+	/* 这三个具有相同行为；如果 DOS FDISK 在柱面 1023 之后对扩展/逻辑分区感到困惑，请使用第二个 */
 	DOS_EXTENDED_PARTITION = 5,
 	LINUX_EXTENDED_PARTITION = 0x85,
 	WIN98_EXTENDED_PARTITION = 0x0f,
 
 	SUN_WHOLE_DISK = DOS_EXTENDED_PARTITION,
 
-	LINUX_SWAP_PARTITION = 0x82,
-	LINUX_DATA_PARTITION = 0x83,
-	LINUX_LVM_PARTITION = 0x8e,
-	LINUX_RAID_PARTITION = 0xfd,	/* autodetect RAID partition */
+	LINUX_SWAP_PARTITION = 0x82,    // Linux 交换分区
+	LINUX_DATA_PARTITION = 0x83,    // Linux 数据分区
+	LINUX_LVM_PARTITION = 0x8e,     // Linux LVM 分区
+	/* autodetect RAID partition */
+	LINUX_RAID_PARTITION = 0xfd,    // 自动检测 RAID 分区
 
-	SOLARIS_X86_PARTITION =	LINUX_SWAP_PARTITION,
-	NEW_SOLARIS_X86_PARTITION = 0xbf,
+	SOLARIS_X86_PARTITION =	LINUX_SWAP_PARTITION, // Solaris 分区（使用 Linux 交换分区 ID）
+	NEW_SOLARIS_X86_PARTITION = 0xbf,              // 新 Solaris 分区
 
+	// DM6 辅助分区1，没有动态磁盘覆盖 (DDO): 使用转换的几何参数
 	DM6_AUX1PARTITION = 0x51,	/* no DDO:  use xlated geom */
+	// DM6 辅助分区3，同上
 	DM6_AUX3PARTITION = 0x53,	/* no DDO:  use xlated geom */
+	// DM6 分区，有动态磁盘覆盖: 使用转换的几何参数和偏移
 	DM6_PARTITION =	0x54,		/* has DDO: use xlated geom & offset */
+	// EZ-Drive
 	EZD_PARTITION =	0x55,		/* EZ-DRIVE */
 
+	// FreeBSD 分区 ID
 	FREEBSD_PARTITION = 0xa5,	/* FreeBSD Partition ID */
+	// OpenBSD 分区 ID
 	OPENBSD_PARTITION = 0xa6,	/* OpenBSD Partition ID */
+	// NetBSD 分区 ID
 	NETBSD_PARTITION = 0xa9,	/* NetBSD Partition ID */
+	// BSDI 分区 ID
 	BSDI_PARTITION = 0xb7,		/* BSDI Partition ID */
+	// Minix 分区 ID
 	MINIX_PARTITION = 0x81,		/* Minix Partition ID */
+	// UnixWare 分区 ID，与 GNU HURD 和 SCO Unix 相同
 	UNIXWARE_PARTITION = 0x63,	/* Same as GNU_HURD and SCO Unix */
 };
 
+// 最大分区数量
 #define DISK_MAX_PARTS			256
+// 磁盘名称长度
 #define DISK_NAME_LEN			32
 
 #include <linux/major.h>
@@ -65,109 +86,180 @@ enum {
 #include <linux/fs.h>
 #include <linux/workqueue.h>
 
+// 描述了一个硬盘分区的详细信息，包括起始扇区、扇区数量等，同时包含对该分区的 I/O 统计信息，是磁盘驱动中的关键数据结构。
+/**
+ * struct partition - 描述硬盘分区表项的结构体
+ * @boot_ind: 活动标记（0x80 表示活动）
+ * @head: 起始磁头
+ * @sector: 起始扇区
+ * @cyl: 起始柱面
+ * @sys_ind: 分区类型
+ * @end_head: 结束磁头
+ * @end_sector: 结束扇区
+ * @end_cyl: 结束柱面
+ * @start_sect: 分区开始的扇区号（从0开始计数）
+ * @nr_sects: 分区中的扇区数
+ */
 struct partition {
+	/* 0x80 - 活动 */
 	unsigned char boot_ind;		/* 0x80 - active */
+	/* 起始磁头 */
 	unsigned char head;		/* starting head */
+	/* 起始扇区 */
 	unsigned char sector;		/* starting sector */
+	/* 起始柱面 */
 	unsigned char cyl;		/* starting cylinder */
+	/* 分区类型 */
 	unsigned char sys_ind;		/* What partition type */
+	/* 结束磁头 */
 	unsigned char end_head;		/* end head */
+	/* 结束扇区 */
 	unsigned char end_sector;	/* end sector */
+	/* 结束柱面 */
 	unsigned char end_cyl;		/* end cylinder */
+	/* 从 0 开始的起始扇区 */
 	__le32 start_sect;	/* starting sector counting from 0 */
+	/* 分区内的扇区数 */
 	__le32 nr_sects;		/* nr of sectors in partition */
-} __attribute__((packed));
+} __attribute__((packed));	// 使用 packed 属性确保编译器不会改变这些字段的布局
 
+// 提供了磁盘操作的详细统计信息，可以用于监控和优化磁盘性能。
+/**
+ * struct disk_stats - 描述磁盘I/O统计信息的结构体
+ * @sectors: 读写扇区数
+ * @ios: 读写操作数
+ * @merges: 合并前的读写操作数
+ * @ticks: 读写操作花费的时间
+ * @io_ticks: 磁盘活跃的总时间
+ * @time_in_queue: 请求在队列中的总时间
+ */
 struct disk_stats {
-	unsigned long sectors[2];	/* READs and WRITEs */
-	unsigned long ios[2];
-	unsigned long merges[2];
-	unsigned long ticks[2];
-	unsigned long io_ticks;
-	unsigned long time_in_queue;
-};
-	
-struct hd_struct {
-	sector_t start_sect;
-	sector_t nr_sects;
-	sector_t alignment_offset;
-	unsigned int discard_alignment;
-	struct device __dev;
-	struct kobject *holder_dir;
-	int policy, partno;
-#ifdef CONFIG_FAIL_MAKE_REQUEST
-	int make_it_fail;
-#endif
-	unsigned long stamp;
-	int in_flight[2];
-#ifdef	CONFIG_SMP
-	struct disk_stats __percpu *dkstats;
-#else
-	struct disk_stats dkstats;
-#endif
-	struct rcu_head rcu_head;
+		/* READs and WRITEs */
+	unsigned long sectors[2];	/* 读和写扇区数 */
+	unsigned long ios[2];		/* 读和写操作数 */
+	unsigned long merges[2];	/* 读和写合并数 */
+	unsigned long ticks[2];		/* 读和写操作时间 */
+	unsigned long io_ticks;		/* I/O 操作的总时间 */
+	unsigned long time_in_queue;	/* 请求在队列的总时间 */
 };
 
-#define GENHD_FL_REMOVABLE			1
+/**
+ * struct hd_struct - 描述硬盘分区的结构体
+ * @start_sect: 分区的起始扇区
+ * @nr_sects: 分区的扇区数
+ * @alignment_offset: 对齐偏移
+ * @discard_alignment: 废弃对齐
+ * @__dev: 设备
+ * @holder_dir: 持有者目录
+ * @policy: 策略
+ * @partno: 分区号
+ * @stamp: 时间戳
+ * @in_flight: 正在处理的读写请求数
+ * @dkstats: 磁盘统计信息
+ * @rcu_head: RCU 头，用于无锁编程
+ */
+struct hd_struct {
+	sector_t start_sect;		/* 分区起始扇区 */
+	sector_t nr_sects;		/* 分区扇区数 */
+	sector_t alignment_offset;	/* 对齐偏移 */
+	unsigned int discard_alignment;	/* 废弃对齐 */
+	struct device __dev;		/* 设备实体 */
+	struct kobject *holder_dir;	/* 持有者目录 */
+	int policy, partno;		/* 策略和分区号 */
+#ifdef CONFIG_FAIL_MAKE_REQUEST
+	int make_it_fail;		/* 测试时用于强制失败 */
+#endif
+	unsigned long stamp;		/* 时间戳 */
+	int in_flight[2];		/* 进行中的读写请求数 */
+#ifdef CONFIG_SMP
+	struct disk_stats __percpu *dkstats;	/* 每 CPU 的磁盘统计数据 */
+#else
+	struct disk_stats dkstats;	/* 磁盘统计数据 */
+#endif
+	struct rcu_head rcu_head;	/* RCU 头部 */
+};
+
+// 硬盘设备标志
+#define GENHD_FL_REMOVABLE			1	// 可移动介质
 /* 2 is unused */
-#define GENHD_FL_MEDIA_CHANGE_NOTIFY		4
-#define GENHD_FL_CD				8
-#define GENHD_FL_UP				16
-#define GENHD_FL_SUPPRESS_PARTITION_INFO	32
+#define GENHD_FL_MEDIA_CHANGE_NOTIFY		4	// 媒体更改通知
+#define GENHD_FL_CD				8		// CD设备
+#define GENHD_FL_UP				16	// 设备已启动（通电）
+#define GENHD_FL_SUPPRESS_PARTITION_INFO	32	// 抑制分区信息
+// 允许扩展的设备编号
 #define GENHD_FL_EXT_DEVT			64 /* allow extended devt */
+// 本地容量处理
 #define GENHD_FL_NATIVE_CAPACITY		128
 
+// SCSI命令的最大数量
 #define BLK_SCSI_MAX_CMDS	(256)
+// 每个长整型可以表示的SCSI命令数
 #define BLK_SCSI_CMD_PER_LONG	(BLK_SCSI_MAX_CMDS / (sizeof(long) * 8))
 
+// SCSI命令过滤结构
 struct blk_scsi_cmd_filter {
+	// 可接受的读命令过滤位图
 	unsigned long read_ok[BLK_SCSI_CMD_PER_LONG];
+	// 可接受的写命令过滤位图
 	unsigned long write_ok[BLK_SCSI_CMD_PER_LONG];
-	struct kobject kobj;
+	struct kobject kobj;	// 关联的 kobject
 };
 
+// 硬盘分区表结构
 struct disk_part_tbl {
-	struct rcu_head rcu_head;
-	int len;
-	struct hd_struct *last_lookup;
-	struct hd_struct *part[];
+	struct rcu_head rcu_head;		// 用于RCU同步
+	int len;	// 分区数组长度
+	struct hd_struct *last_lookup;	// 上一次查找的分区
+	struct hd_struct *part[];	// 动态大小的分区数组
 };
 
+// 通用硬盘结构
 struct gendisk {
 	/* major, first_minor and minors are input parameters only,
 	 * don't use directly.  Use disk_devt() and disk_max_parts().
 	 */
+	// 主设备号
 	int major;			/* major number of driver */
+	// 第一个次设备号
 	int first_minor;
+	// 最大次设备数，对于不能分区的硬盘为1
 	int minors;                     /* maximum number of minors, =1 for
                                          * disks that can't be partitioned. */
-
+	// 硬盘名称
 	char disk_name[DISK_NAME_LEN];	/* name of major driver */
+	// 设备节点名生成函数
 	char *(*devnode)(struct gendisk *gd, mode_t *mode);
 	/* Array of pointers to partitions indexed by partno.
 	 * Protected with matching bdev lock but stat and other
 	 * non-critical accesses use RCU.  Always access through
 	 * helpers.
 	 */
-	struct disk_part_tbl *part_tbl;
-	struct hd_struct part0;
+	// 分区表
+	struct disk_part_tbl *part_tbl;	// 分区表指针
+	struct hd_struct part0;					// 嵌入的第0分区（通常代表整个硬盘）
+	
+	const struct block_device_operations *fops;	// 块设备操作函数
+	struct request_queue *queue;		// 请求队列
+	void *private_data;							// 私有数据指针
 
-	const struct block_device_operations *fops;
-	struct request_queue *queue;
-	void *private_data;
-
-	int flags;
+	int flags;	// 设备标志
+	// FIXME: remove 已弃用
 	struct device *driverfs_dev;  // FIXME: remove
+	// 从属目录的 kobject
 	struct kobject *slave_dir;
 
+	// 随机数状态，用于部分旧的IO调度
 	struct timer_rand_state *random;
 
+	// RAID同步IO计数
 	atomic_t sync_io;		/* RAID */
+	// 异步通知工作结构
 	struct work_struct async_notify;
 #ifdef  CONFIG_BLK_DEV_INTEGRITY
+	// 块设备完整性数据结构
 	struct blk_integrity *integrity;
 #endif
-	int node_id;
+	int node_id;	// 设备所在NUMA节点ID
 };
 
 static inline struct gendisk *part_to_disk(struct hd_struct *part)

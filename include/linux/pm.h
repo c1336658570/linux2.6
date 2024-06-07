@@ -31,6 +31,9 @@
 /*
  * Callbacks for platform drivers to implement.
  */
+/*
+ * 平台驱动程序要实现的回调函数。
+ */
 extern void (*pm_idle)(void);
 extern void (*pm_power_off)(void);
 extern void (*pm_power_off_prepare)(void);
@@ -38,11 +41,15 @@ extern void (*pm_power_off_prepare)(void);
 /*
  * Device power management
  */
+/*
+ * 设备电源管理
+ */
 
 struct device;
 
+// pm_message结构体定义了电源管理事件消息
 typedef struct pm_message {
-	int event;
+	int event;	// 事件类型
 } pm_message_t;
 
 /**
@@ -193,6 +200,81 @@ typedef struct pm_message {
  *	power state if all of the necessary conditions are satisfied.  Check
  *	these conditions and handle the device as appropriate, possibly queueing
  *	a suspend request for it.  The return value is ignored by the PM core.
+ */
+/**
+ * struct dev_pm_ops - 设备电源管理（PM）回调函数
+ *
+ * 多个驱动程序电源状态转换是外部可见的，影响待处理的I/O队列状态以及（对于操作硬件的驱动程序）
+ * 中断、唤醒事件、DMA以及其他硬件状态。还可能有其他内部转换到各种低功耗模式，这些对驱动程序
+ * 栈的其余部分是透明的（如一个处于ON状态的驱动程序关闭当前未在活跃使用的时钟）。
+ *
+ * 下面列出的回调函数用于处理外部可见的转换：
+ *
+ * @prepare: 准备设备进行即将到来的状态转换，但不更改其硬件状态。在 prepare() 返回后，
+ *           阻止新的子设备被注册（驱动程序的子系统和通常情况下内核的其他部分也应阻止新的
+ *           probe 调用一旬 prepare() 成功）。如果 prepare() 检测到无法处理的情况（如子设备
+ *           正在注册中），它可以返回 -EAGAIN，让PM核心可以再次执行它（例如在新子设备注册后）
+ *           以从竞态条件中恢复。这个方法对所有类型的挂起转换执行，并且后续会有一个挂起回调：
+ *           suspend()、freeze() 或 poweroff()。
+ *
+ * @complete: 撤销 prepare() 所做的更改。这个方法在所有类型的恢复转换后执行，继挂起回调之后：
+ *            resume()、thaw()、restore()。也在状态转换失败前调用（例如，如果一个设备的挂起回调
+ *            失败了，PM核心尝试挂起的其他设备也未成功）。
+ *
+ * @suspend: 在系统进入保留主存内容的睡眠状态前执行。让设备静止，将其置于适合即将到来的系统状态的
+ *           低功耗状态（如PCI_D3hot），并适当启用唤醒事件。
+ *
+ * @resume: 在系统从保留主存内容的睡眠状态唤醒后执行。根据前一个 suspend() 中保存的信息，将设备
+ *          置于适当状态。驱动程序重新开始工作，响应硬件事件和软件请求。硬件可能已经经历了电源关闭
+ *          重置，或者可能保持了从前一个 suspend() 的状态，驱动程序可以在恢复时依赖这些状态。在大多数
+ *          平台上，恢复期间资源如时钟的可用性没有限制。
+ *
+ * @freeze: 为创建休眠镜像前执行。静止操作以创建一致的镜像，但不要将设备置于低功耗状态，也不要发出
+ *          系统唤醒事件。在内存中保存恢复时或在随后的 thaw() 中使用的设备设置，如果镜像创建或主存内容
+ *          恢复失败。
+ *
+ * @thaw: 在创建休眠镜像后或如果镜像创建失败后执行。也在尝试从该镜像恢复主存内容失败后执行。撤销 freeze()
+ *        所做的更改，使设备可以像 freeze() 调用前一样操作。
+ *
+ * @poweroff: 在保存休眠镜像后执行。让设备静止，将其置于适合即将到来的系统状态的低功耗状态（如PCI_D3hot），
+ *            并适当启用唤醒事件。
+ *
+ * @restore: 在从休眠镜像恢复主存内容后执行。驱动程序重新开始工作，响应硬件事件和软件请求。驱动程序不能
+ *           对 restore() 之前的硬件状态做任何假设。在大多数平台上，恢复操作期间资源如时钟的可用性没有限制。
+ *
+ * @suspend_noirq: 完成 suspend() 的操作，执行挂起设备所需的、需要禁用中断的任何操作。
+ *
+ * @resume_noirq: 为执行 resume() 准备，执行恢复设备所需的、需要禁用中断的任何操作。
+ *
+ * @freeze_noirq: 完成 freeze() 的操作，执行冻结设备所需的、需要禁用中断的任何操作。
+ *
+ * @thaw_noirq: 为执行 thaw() 准备，执行解冻设备所需的、需要禁用中断的任何操作。
+ *
+ * @poweroff_noirq: 完成 poweroff() 的操作，执行处理设备所需的、需要禁用中断的任何操作。
+ *
+ * @restore_noirq: 为执行 restore() 准备，执行恢复设备操作所需的、需要禁用中断的任何操作。
+ *
+ * 除了 @complete() 之外的所有上述回调都返回错误代码。然而，恢复操作中返回的错误代码（@resume()、@thaw()、
+ * @restore()、@resume_noirq()、@thaw_noirq() 和 @restore_noirq()）不会导致 PM 核心中止返回它们的恢复转换。
+ * 在这种情况下返回的错误代码仅由 PM 核心打印到系统日志中用于调试目的。尽管如此，建议驱动程序只在不可恢复的
+ * 失败情况下（即，设备拒绝恢复并变得不可用时）从其恢复方法中返回错误代码，以允许我们在未来修改 PM 核心，
+ * 从而避免尝试处理未能恢复的设备及其子设备。
+ *
+ * 允许在执行上述回调时注销设备。然而，不允许从任何自身的回调中注销设备。
+ *
+ * 还有以下与设备运行时电源管理相关的回调：
+ *
+ * @runtime_suspend: 准备设备进入由于电源管理无法与 CPU 和 RAM 通信的状态。
+ *                    这并不意味着设备应该进入低功耗状态。例如，如果设备位于即将关闭的链路后面，
+ *                    设备可以保持全功率。如果设备确实进入低功耗并且能够生成运行时唤醒事件，
+ *                    应该为其启用远程唤醒（即，允许设备通过唤醒事件请求改变其电源状态的硬件机制，
+ *                    如 PCI PME）。
+ *
+ * @runtime_resume: 响应硬件生成的唤醒事件或软件请求将设备置于完全活跃状态。
+ *                   如有必要，将设备置于全功率状态并恢复其寄存器，以使其完全可操作。
+ *
+ * @runtime_idle: 设备看起来处于非活跃状态，如果满足所有必要条件，可能会被置于低功耗状态。
+ *                 检查这些条件并适当处理设备，可能会为其排队一个挂起请求。返回值被 PM 核心忽略。
  */
 
 struct dev_pm_ops {

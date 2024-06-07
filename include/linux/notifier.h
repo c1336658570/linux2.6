@@ -46,31 +46,55 @@
  * chains are slightly more difficult to use because they require special
  * runtime initialization.
  */
+/*
+ * 通知器链有四种类型：
+ *
+ *    原子通知器链：链回调在中断/原子上下文中运行。回调不允许阻塞。
+ *    阻塞通知器链：链回调在进程上下文中运行。回调允许阻塞。
+ *    原始通知器链：对回调、注册或注销没有限制。所有锁定和保护必须由调用者提供。
+ *    SRCU通知器链：阻塞通知器链的变体，具有相同的限制。
+ *
+ * atomic_notifier_chain_register() 可以在原子上下文中调用，
+ * 但 blocking_notifier_chain_register() 和 srcu_notifier_chain_register()
+ * 必须在进程上下文中调用。对应的 _unregister() 例程也是如此。
+ *
+ * atomic_notifier_chain_unregister(), blocking_notifier_chain_unregister(),
+ * 和 srcu_notifier_chain_unregister() _不能_ 在调用链中调用。
+ *
+ * SRCU 通知器链是阻塞通知器链的另一种形式。
+ * 它们使用 SRCU（可休眠的读-复制更新）而不是读写信号量来保护链链接。
+ * 这意味着在 srcu_notifier_call_chain() 中有非常低的开销：没有缓存弹跳和无内存屏障。
+ * 作为补偿，srcu_notifier_chain_unregister() 相对较昂贵。
+ * SRCU 通知器链应当在通知链将非常频繁地被调用但 notifier_blocks 很少被移除时使用。
+ * 此外，SRCU 通知器链使用起来稍微复杂一些，因为它们需要特殊的运行时初始化。
+ */
+
 
 struct notifier_block {
+	// 通知函数指针
 	int (*notifier_call)(struct notifier_block *, unsigned long, void *);
-	struct notifier_block *next;
-	int priority;
+	struct notifier_block *next;	// 链中的下一个通知器块
+	int priority;	// 优先级
 };
 
 struct atomic_notifier_head {
-	spinlock_t lock;
-	struct notifier_block *head;
+	spinlock_t lock;	// 保护通知器链的自旋锁
+	struct notifier_block *head;	// 指向链表头部的指针
 };
 
 struct blocking_notifier_head {
-	struct rw_semaphore rwsem;
-	struct notifier_block *head;
+	struct rw_semaphore rwsem;	// 读写信号量用于保护通知器链
+	struct notifier_block *head;	// 指向链表头部的指针
 };
 
 struct raw_notifier_head {
-	struct notifier_block *head;
+	struct notifier_block *head;	// 指向链表头部的指针，无锁保护
 };
 
 struct srcu_notifier_head {
-	struct mutex mutex;
-	struct srcu_struct srcu;
-	struct notifier_block *head;
+	struct mutex mutex;		// 互斥锁用于保护通知器链
+	struct srcu_struct srcu;		// SRCU 结构体
+	struct notifier_block *head;	// 指向链表头部的指针
 };
 
 #define ATOMIC_INIT_NOTIFIER_HEAD(name) do {	\

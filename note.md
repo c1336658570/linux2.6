@@ -117,3 +117,12 @@ M       include/linux/kobject.h
 M       include/linux/kref.h
 M       include/linux/sysfs.h
 M       lib/kref.c
+
+M       drivers/base/base.h
+M       drivers/base/class.c
+M       include/linux/device.h
+M       include/linux/genhd.h
+M       include/linux/klist.h
+M       include/linux/notifier.h
+M       include/linux/pm.h
+M       include/linux/srcu.h

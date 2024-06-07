@@ -8,6 +8,10 @@
 #include <asm/atomic.h>
 #include <asm/pgtable.h>
 
+// 定义init_mm
+// 所有mm_struct形成的链表。该链表首元素是init_mm描述符，它代表init进程的地址空间
+// 操作该链表时需要使用mmlist_lock，该锁定义在fork.c中
+// mm_struct 中 mmlist的首元素;
 struct mm_struct init_mm = {
 	.mm_rb		= RB_ROOT,
 	.pgd		= swapper_pg_dir,

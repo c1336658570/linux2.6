@@ -661,12 +661,16 @@ assign_new_owner:
  * Turn us into a lazy TLB process if we
  * aren't already..
  */
+/*
+ * 如果当前进程还不是懒惰TLB进程，将其转变成懒惰TLB进程。
+ */
 static void exit_mm(struct task_struct * tsk)
 {
 	struct mm_struct *mm = tsk->mm;
 	struct core_state *core_state;
 
 	mm_release(tsk, mm);
+	// 如果进程没有内存管理结构，直接返回
 	if (!mm)
 		return;
 	/*
@@ -676,7 +680,12 @@ static void exit_mm(struct task_struct * tsk)
 	 * will increment ->nr_threads for each thread in the
 	 * group with ->mm != NULL.
 	 */
-	down_read(&mm->mmap_sem);
+	/*
+	 * 与可能正在进行的核心转储序列化。
+	 * 我们必须在检查 core_state 并清除 tsk->mm 时持有 mmap_sem。
+	 * 引起核心转储的线程将为每个具有非空 ->mm 的线程组成员增加 ->nr_threads。
+	 */
+	down_read(&mm->mmap_sem);	// 获取读锁
 	core_state = mm->core_state;
 	if (core_state) {
 		struct core_thread self;
@@ -688,30 +697,40 @@ static void exit_mm(struct task_struct * tsk)
 		 * Implies mb(), the result of xchg() must be visible
 		 * to core_state->dumper.
 		 */
+		/*
+		 * 保证内存屏障，xchg() 的结果必须对 core_state->dumper 可见。
+		 */
 		if (atomic_dec_and_test(&core_state->nr_threads))
+			// 如果是最后一个线程，触发核心转储
 			complete(&core_state->startup);
 
 		for (;;) {
 			set_task_state(tsk, TASK_UNINTERRUPTIBLE);
+			/* 由 coredump_finish() 设置 */
 			if (!self.task) /* see coredump_finish() */
 				break;
-			schedule();
+			schedule();	// 调度其他任务
 		}
 		__set_task_state(tsk, TASK_RUNNING);
+		// 再次获取读锁
 		down_read(&mm->mmap_sem);
 	}
+	// 增加 mm 结构的引用计数
 	atomic_inc(&mm->mm_count);
-	BUG_ON(mm != tsk->active_mm);
+	BUG_ON(mm != tsk->active_mm);	// 检查 mm 是否为活动的 mm
 	/* more a memory barrier than a real lock */
+	/* 更多的是作为内存屏障而不是真正的锁 */
 	task_lock(tsk);
 	tsk->mm = NULL;
-	up_read(&mm->mmap_sem);
-	enter_lazy_tlb(mm, current);
+	up_read(&mm->mmap_sem);	// 释放读锁
+	enter_lazy_tlb(mm, current);// 将当前进程设置为懒惰TLB模式
 	/* We don't want this task to be frozen prematurely */
+	/* 我们不希望这个任务过早被冻结 */
 	clear_freeze_flag(tsk);
 	task_unlock(tsk);
 	mm_update_next_owner(mm);
-	// 减少内存描述符中的mm_users用户计数，如果用户计数降为0将调用mmdrop函数，减少mm_count计数
+	// 减少 mm 结构的引用计数，并在必要时释放
+	// 减少内存描述符中的mm_users用户计数，如果用户引用计数降为0将调用mmdrop函数，减少mm_count计数
 	// 如果mm_count也为0,将调用free_mm，free_mm宏通过kmem_cache_free将内存还给mm_cachep 的slab
 	mmput(mm);
 }

@@ -126,3 +126,16 @@ M       include/linux/klist.h
 M       include/linux/notifier.h
 M       include/linux/pm.h
 M       include/linux/srcu.h
+
+M       arch/x86/mm/mmap.c
+M       arch/xtensa/include/asm/page.h
+M       include/asm-generic/mman-common.h
+M       include/linux/mm.h
+M       include/linux/mm_types.h
+M       include/linux/sched.h
+M       kernel/exit.c
+M       kernel/fork.c
+M       mm/init-mm.c
+M       mm/internal.h
+M       mm/mlock.c
+M       mm/mmap.c

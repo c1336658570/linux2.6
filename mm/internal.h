@@ -71,8 +71,13 @@ extern long mlock_vma_pages_range(struct vm_area_struct *vma,
 			unsigned long start, unsigned long end);
 extern void munlock_vma_pages_range(struct vm_area_struct *vma,
 			unsigned long start, unsigned long end);
+/*
+ * 解锁虚拟内存区域（VMA）中的所有页。
+ */
 static inline void munlock_vma_pages_all(struct vm_area_struct *vma)
 {
+	// 调用 munlock_vma_pages_range 函数，传入 VMA 的起始和结束地址，
+	// 解锁从 vm_start 到 vm_end 范围内的所有页
 	munlock_vma_pages_range(vma, vma->vm_start, vma->vm_end);
 }
 

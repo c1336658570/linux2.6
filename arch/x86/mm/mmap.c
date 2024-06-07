@@ -118,19 +118,30 @@ static unsigned long mmap_legacy_base(void)
 		return TASK_UNMAPPED_BASE + mmap_rnd();
 }
 
+// 该函数在创建新进程的虚拟内存映像的非常早期阶段被调用，用于设置使用哪种虚拟内存（VM）布局函数。
 /*
  * This function, called very early during the creation of a new
  * process VM image, sets up which VM layout function to use:
  */
+/*
+ * 该函数在新进程虚拟内存映像创建的非常早期被调用，用于设置使用哪种虚拟内存布局函数：
+ */
 void arch_pick_mmap_layout(struct mm_struct *mm)
 {
+	// 检查是否应使用传统的内存映射（mmap）布局
 	if (mmap_is_legacy()) {
+		// 如果是传统的内存映射布局，设置 mmap 基地址为传统基地址
 		mm->mmap_base = mmap_legacy_base();
+		// 设置获取未映射区域的函数为标准的底向上映射函数
 		mm->get_unmapped_area = arch_get_unmapped_area;
+		// 设置取消映射区域的函数为标准的取消映射函数
 		mm->unmap_area = arch_unmap_area;
 	} else {
+		// 如果不使用传统布局，设置 mmap 基地址为默认的基地址
 		mm->mmap_base = mmap_base();
+		// 设置获取未映射区域的函数为自顶向下映射函数
 		mm->get_unmapped_area = arch_get_unmapped_area_topdown;
+		// 设置取消映射区域的函数为自顶向下的取消映射函数
 		mm->unmap_area = arch_unmap_area_topdown;
 	}
 }

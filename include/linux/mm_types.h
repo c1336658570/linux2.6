@@ -339,10 +339,12 @@ struct mm_struct {
 	struct rb_root mm_rb;		// VMA形成的红黑树
 	// 最近使用的内存区域
 	struct vm_area_struct * mmap_cache;	/* last find_vma result */
+// 存在MMU
 #ifdef CONFIG_MMU
 	unsigned long (*get_unmapped_area) (struct file *filp,
 				unsigned long addr, unsigned long len,
 				unsigned long pgoff, unsigned long flags);
+	// 取消映射区域的函数
 	void (*unmap_area) (struct mm_struct *mm, unsigned long addr);
 #endif
 	// 内存映射基地址
@@ -355,18 +357,19 @@ struct mm_struct {
 	unsigned long free_area_cache;		/* first hole of size cached_hole_size or larger */
 	// 页全局目录
 	pgd_t * pgd;	// 指向进程的页全局目录
-	// 使用地址空间的用户数
+	// 使用地址空间的用户数。mm_users记录使用该地址空间的进程数
 	atomic_t mm_users;			/* How many users with user space? */
-	// 主使用计数器
+	// 主使用计数器。mm_count是mm_struct结构体的主引用计数。如果内核需要对mm_struct操作就需要增加该计数器。
 	atomic_t mm_count;			/* How many references to "struct mm_struct" (users count as 1) */
 	// 内存区域的个数
 	int map_count;				/* number of VMAs */
 	// 内存区域的信号量
 	struct rw_semaphore mmap_sem;
-	// 页表锁，操作和检索页表时必须使用该锁。
+	// 页表锁，操作和检索页表（pgd）时必须使用该锁。
 	spinlock_t page_table_lock;		/* Protects page tables and some counters */
 
-	// 所有mm_struct形成的链表
+	// 所有mm_struct形成的链表。该链表首元素是init_mm描述符，它代表init进程的地址空间
+	// 操作该链表时需要使用mmlist_lock，该锁定义在fork.c中
 	struct list_head mmlist;		/* List of maybe swapped mm's.	These are globally strung
 						 * together off init_mm.mmlist, and are protected
 						 * by mmlist_lock
@@ -374,6 +377,7 @@ struct mm_struct {
 
 	// 所分配的物理页
 	unsigned long hiwater_rss;	/* High-watermark of RSS usage */	// 最高水位线的常驻集大小
+	// mm 的最高虚拟内存大小
 	unsigned long hiwater_vm;	/* High-water virtual memory usage */	// 最高虚拟内存使用量
 	// 全部页面数和上锁页面数
 	unsigned long total_vm, locked_vm, shared_vm, exec_vm;

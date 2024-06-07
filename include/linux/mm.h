@@ -14,6 +14,8 @@
 #include <linux/mm_types.h>
 #include <linux/range.h>
 
+/* 定义了一些前向声明的结构体，这些结构体用于内存策略、匿名虚拟内存、文件读取状态、用户结构体、写回控制以及资源限制 */
+struct mempolicy;
 struct mempolicy;
 struct anon_vma;
 struct file_ra_state;
@@ -21,18 +23,26 @@ struct user_struct;
 struct writeback_control;
 struct rlimit;
 
+/* 如果没有定义 CONFIG_DISCONTIGMEM */
 #ifndef CONFIG_DISCONTIGMEM          /* Don't use mapnrs, do it properly */
+/* 声明 max_mapnr，用于表示系统中物理页面的最大数目 */
 extern unsigned long max_mapnr;
 #endif
 
+/* 系统中的物理页数 */
 extern unsigned long num_physpages;
+/* 系统中的总物理页数 */
 extern unsigned long totalram_pages;
+/* 指向系统中可用的最高内存地址 */
 extern void * high_memory;
+/* 页聚合的数量 */
 extern int page_cluster;
 
 #ifdef CONFIG_SYSCTL
+/* 用于控制是否启用旧的虚拟地址布局 */
 extern int sysctl_legacy_va_layout;
 #else
+/* 如果没有启用 CONFIG_SYSCTL，定义 sysctl_legacy_va_layout 为 0 */
 #define sysctl_legacy_va_layout 0
 #endif
 
@@ -40,9 +50,11 @@ extern int sysctl_legacy_va_layout;
 #include <asm/pgtable.h>
 #include <asm/processor.h>
 
+/* 定义一个宏，用于获取 page 结构中第 n 个页面 */
 #define nth_page(page,n) pfn_to_page(page_to_pfn((page)) + (n))
 
 /* to align the pointer to the (next) page boundary */
+/* 定义一个宏，用于将地址向上对齐到下一个页面边界 */
 #define PAGE_ALIGN(addr) ALIGN(addr, PAGE_SIZE)
 
 /*
@@ -54,12 +66,16 @@ extern int sysctl_legacy_va_layout;
  * mmap() functions).
  */
 
+/* 外部声明，用于 VMA 结构的缓存 */
 extern struct kmem_cache *vm_area_cachep;
 
 #ifndef CONFIG_MMU
+/* 用于非 MMU 系统的区域管理红黑树的根 */
 extern struct rb_root nommu_region_tree;
+/* 用于访问 nommu_region_tree 的读写信号量 */
 extern struct rw_semaphore nommu_region_sem;
 
+/* 函数声明，用于获取内核对象的大小 */
 extern unsigned int kobjsize(const void *objp);
 #endif
 
@@ -90,9 +106,11 @@ extern unsigned int kobjsize(const void *objp);
 // 区域映射设备I/O空间
 #define VM_IO           0x00004000	/* Memory mapped I/O or similar */
 
-					/* Used by sys_madvise() */
+/* Used by sys_madvise() */
+// 下面俩标志可以由系统调用madvise设置，参数分别是MADV_SEQUENTIAL和MADV_RANDOM
 // 表示应用程序是顺序和随机读，用来提醒内核是否进行文件预读
 #define VM_SEQ_READ	0x00008000	/* App will access data sequentially */
+// 表示随即读，内核不应该进行预读
 #define VM_RAND_READ	0x00010000	/* App will not benefit from clustered reads */
 
 #define VM_DONTCOPY	0x00020000      /* Do not copy this vma on fork */
@@ -1317,7 +1335,8 @@ extern unsigned long mmap_region(struct file *file, unsigned long addr,
 // file指定文件，具体文件偏移从offset开始，长度为len字节。如果file是NULL并且offset是0，
 // 那么就代表这次映射没有和文件相关，这种情况称为匿名映射。如果指定文件和偏移就称为文件映射。
 // addr是可选参数，指定搜索空闲区域的起始地址。
-// prot参数指定内存区域中页面的访问权限。权限在asm/mman.h中。不同体系结构定义不同。
+// prot参数指定内存区域中页面的访问权限。权限在asm/mman.h中（X86在asm-generic/
+// mman-common.h中。不同体系结构定义不同。
 // PROT_READ		对应VM_READ
 // PROT_WRITE		对应VM_WRITE
 // PROT_EXEC		对应VM_EXEC
@@ -1342,13 +1361,17 @@ static inline unsigned long do_mmap(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
 	unsigned long flag, unsigned long offset)
 {
+	// 初始化返回值为 -EINVAL，表示非法参数
 	unsigned long ret = -EINVAL;
+	// 检查偏移加长度是否溢出
 	if ((offset + PAGE_ALIGN(len)) < offset)
-		goto out;
+		goto out;	// 如果有溢出，直接跳转到函数末尾返回错误
+	// 检查偏移是否按页对齐
 	if (!(offset & ~PAGE_MASK))
+		// 如果按页对齐，则调用 do_mmap_pgoff 函数进行映射
 		ret = do_mmap_pgoff(file, addr, len, prot, flag, offset >> PAGE_SHIFT);
 out:
-	return ret;
+	return ret;	// 返回结果，成功或错误代码
 }
 
 // 从特定的进程地址空间中删除指定地址区间
@@ -1420,6 +1443,12 @@ extern struct vm_area_struct * find_vma_prev(struct mm_struct * mm, unsigned lon
 如果没有则为 NULL。  假设起始地址 < 结束地址。*/
 // 返回第一个和指定地址区间相交的VMA。mm是要搜索的地址空间，
 // start_addr是区间开始的首地址，end_addr是区间尾地址
+/**
+ * 首先通过 find_vma 函数找到第一个其结束地址大于 start_addr 的 VMA。
+ * 然后检查这个 VMA 的开始地址是否在 end_addr 之后，如果是，则两个区间没有交集，
+ * 因此返回 NULL。如果不是，即这个 VMA 的开始地址小于 end_addr，
+ * 则这个 VMA 与给定的地址区间 [start_addr, end_addr-1] 存在交集，因此返回该 VMA。
+ */
 static inline struct vm_area_struct * find_vma_intersection(struct mm_struct * mm, unsigned long start_addr, unsigned long end_addr)
 {
 	struct vm_area_struct * vma = find_vma(mm,start_addr);
@@ -1429,8 +1458,12 @@ static inline struct vm_area_struct * find_vma_intersection(struct mm_struct * m
 	return vma;
 }
 
+/*
+ * 计算虚拟内存区域（VMA）中的页数。
+ */
 static inline unsigned long vma_pages(struct vm_area_struct *vma)
 {
+	// 返回 VMA 区域的长度除以页面大小，即计算出该区域包含多少个页面
 	return (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
 }
 

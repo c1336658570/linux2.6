@@ -2101,9 +2101,11 @@ static inline int sas_ss_flags(unsigned long sp)
 extern struct mm_struct * mm_alloc(void);
 
 /* mmdrop drops the mm and the page tables */
+/* mmdrop用于释放mm结构和页表 */
 extern void __mmdrop(struct mm_struct *);
 static inline void mmdrop(struct mm_struct * mm)
 {
+	/* 如果mm_count减到0则调用__mmdrop */
 	if (unlikely(atomic_dec_and_test(&mm->mm_count)))
 		__mmdrop(mm);
 }

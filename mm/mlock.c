@@ -306,14 +306,33 @@ no_mlock:
  * and re-mlocked by try_to_{munlock|unmap} before we unmap and
  * free them.  This will result in freeing mlocked pages.
  */
+/*
+ * munlock_vma_pages_range() - 解锁 VMA 范围内的所有页面。
+ * @vma - 包含要解锁的范围的虚拟内存区域。
+ * @start - 在 @vma 中范围的起始地址
+ * @end - 在 @vma 中范围的结束地址。
+ *
+ * 用于 mremap()、munmap() 和退出过程。
+ *
+ * 调用时 @vma 应为 VM_LOCKED。
+ *
+ * 返回时 VM_LOCKED 被清除。调用者必须准备处理这一点。
+ *
+ * 我们在这里不保存和恢复 VM_LOCKED，因为页面仍在 LRU 列表上。在取消映射路径中，
+ * 页面可能被回收扫描并在我们取消映射和释放它们之前被 try_to_{munlock|unmap} 重新锁定。
+ * 这可能导致释放已锁定的页面。
+ */
 void munlock_vma_pages_range(struct vm_area_struct *vma,
 			     unsigned long start, unsigned long end)
 {
 	unsigned long addr;
 
+	// 确保本地 CPU 的 LRU 列表被刷新
 	lru_add_drain();
+	// 清除 VMA 的 VM_LOCKED 标志
 	vma->vm_flags &= ~VM_LOCKED;
 
+	// 遍历指定范围内的每一页
 	for (addr = start; addr < end; addr += PAGE_SIZE) {
 		struct page *page;
 		/*
@@ -323,21 +342,31 @@ void munlock_vma_pages_range(struct vm_area_struct *vma,
 		 * suits munlock very well (and if somehow an abnormal page
 		 * has sneaked into the range, we won't oops here: great).
 		 */
-		page = follow_page(vma, addr, FOLL_GET | FOLL_DUMP);
-		if (page && !IS_ERR(page)) {
-			lock_page(page);
+		/*
+		 * 虽然 FOLL_DUMP 本意是为 get_dump_page() 设计，
+		 * 但恰巧它对 ZERO_PAGE（返回错误而不是执行 get_page）的特殊处理
+		 * 很适合 munlock 使用（而且如果某些异常页面偷偷进入范围，我们也不会触发异常：很好）。
+		 */
+		page = follow_page(vma, addr, FOLL_GET | FOLL_DUMP);	// 尝试获取页
+		if (page && !IS_ERR(page)) {	// 如果页面有效且没有错误
+			lock_page(page);	// 锁定页面
 			/*
 			 * Like in __mlock_vma_pages_range(),
 			 * because we lock page here and migration is
 			 * blocked by the elevated reference, we need
 			 * only check for file-cache page truncation.
 			 */
+			/*
+			 * 如同 __mlock_vma_pages_range() 中，
+			 * 因为我们在这里锁定了页面，并且由于增加的引用计数阻止了迁移，
+			 * 我们只需检查文件缓存页面是否被截断。
+			 */
 			if (page->mapping)
-				munlock_vma_page(page);
-			unlock_page(page);
-			put_page(page);
+				munlock_vma_page(page);	// 解锁页面
+			unlock_page(page);	// 解锁页面
+			put_page(page);	// 释放页面引用
 		}
-		cond_resched();
+		cond_resched();	// 提供一个让出 CPU 的机会
 	}
 }
 

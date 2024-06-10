@@ -21,49 +21,72 @@ struct page;
 struct device;
 struct dentry;
 
+// 与后备设备（通常指存储设备）相关的信息和操作，包括写回控制、设备拥塞状态监测等功能。
+
 /*
  * Bits in backing_dev_info.state
  */
+/*
+ * backing_dev_info.state的位标识
+ */
 enum bdi_state {
+	/* 正在激活的过程中 */
 	BDI_pending,		/* On its way to being activated */
+	/* 默认嵌入的写回控制已分配 */
 	BDI_wb_alloc,		/* Default embedded wb allocated */
+	/* 异步（写）队列正在变满 */
 	BDI_async_congested,	/* The async (write) queue is getting full */
+		/* 同步队列正在变满 */
 	BDI_sync_congested,	/* The sync queue is getting full */
+	/* 已完成bdi_register()调用 */
 	BDI_registered,		/* bdi_register() was done */
+	/* 从这里开始是可用的位 */
 	BDI_unused,		/* Available bits start here */
 };
 
 typedef int (congested_fn)(void *, int);
 
 enum bdi_stat_item {
-	BDI_RECLAIMABLE,
-	BDI_WRITEBACK,
+	BDI_RECLAIMABLE,	/* 可回收的 */
+	BDI_WRITEBACK,		/* 正在写回 */
 	NR_BDI_STAT_ITEMS
 };
 
 #define BDI_STAT_BATCH (8*(1+ilog2(nr_cpu_ids)))
 
 struct bdi_writeback {
+	/* 挂在bdi下 */
 	struct list_head list;			/* hangs off the bdi */
 
+	/* 父bdi */
 	struct backing_dev_info *bdi;		/* our parent bdi */
 	unsigned int nr;
 
+	/* 上次老数据刷新时间 */
 	unsigned long last_old_flush;		/* last old data flush */
 
+	/* 写回任务 */
 	struct task_struct	*task;		/* writeback task */
+	/* 脏inode列表 */
 	struct list_head	b_dirty;	/* dirty inodes */
+	/* 停车等待写回 */
 	struct list_head	b_io;		/* parked for writeback */
+	/* 停车等待更多写回 */
 	struct list_head	b_more_io;	/* parked for more writeback */
 };
 
 struct backing_dev_info {
 	struct list_head bdi_list;
 	struct rcu_head rcu_head;
+	/* 最大预读大小，以PAGE_CACHE_SIZE为单位 */
 	unsigned long ra_pages;	/* max readahead in PAGE_CACHE_SIZE units */
+	/* 使用此变量时始终使用原子位操作 */
 	unsigned long state;	/* Always use atomic bitops on this */
+	/* 设备能力 */
 	unsigned int capabilities; /* Device capabilities */
+	/* 如果设备是md/dm，这是函数指针 */
 	congested_fn *congested_fn; /* Function pointer if device is md/dm */
+	/* 拥塞函数的辅助数据指针 */
 	void *congested_data;	/* Pointer to aux data for congested func */
 	void (*unplug_io_fn)(struct backing_dev_info *, struct page *);
 	void *unplug_io_data;
@@ -78,10 +101,15 @@ struct backing_dev_info {
 	unsigned int min_ratio;
 	unsigned int max_ratio, max_prop_frac;
 
+	/* 此bdi的默认写回信息 */
 	struct bdi_writeback wb;  /* default writeback info for this bdi */
+	/* 保护wb_list更新端 */
 	spinlock_t wb_lock;	  /* protects update side of wb_list */
+	/* 挂在这个bdi下的刷新线程 */
 	struct list_head wb_list; /* the flusher threads hanging off this bdi */
+	/* 已注册任务的位掩码 */
 	unsigned long wb_mask;	  /* bitmask of registered tasks */
+	/* 已注册任务的数量 */
 	unsigned int wb_cnt;	  /* number of registered tasks */
 
 	struct list_head work_list;

@@ -139,3 +139,24 @@ M       mm/init-mm.c
 M       mm/internal.h
 M       mm/mlock.c
 M       mm/mmap.c
+
+M       block/blk-core.c
+M       fs/buffer.c
+M       fs/direct-io.c
+M       fs/ext2/file.c
+M       fs/ext2/inode.c
+M       fs/ext3/inode.c
+M       fs/fs-writeback.c
+M       fs/mpage.c
+M       fs/read_write.c
+M       include/linux/aio.h
+M       include/linux/backing-dev.h
+M       include/linux/blkdev.h
+M       include/linux/buffer_head.h
+M       include/linux/fs.h
+M       include/linux/pagemap.h
+M       include/linux/uio.h
+M       include/linux/writeback.h
+M       kernel/wait.c
+M       mm/filemap.c
+M       mm/page-writeback.c

@@ -1088,33 +1088,42 @@ grow_buffers(struct block_device *bdev, sector_t block, int size)
 	return 1;
 }
 
+// 这是 __getblk 的一个辅助函数，用于在没有快速找到对应的 buffer_head 时，通过更慢的路径尝试获取或创建一个 buffer_head。
 static struct buffer_head *
 __getblk_slow(struct block_device *bdev, sector_t block, int size)
 {
 	/* Size must be multiple of hard sectorsize */
+	/* 大小必须是硬盘扇区大小的整数倍 */
+	// 检查所请求的块大小是否合法：必须是逻辑块大小的整数倍，且大小范围合理
 	if (unlikely(size & (bdev_logical_block_size(bdev)-1) ||
 			(size < 512 || size > PAGE_SIZE))) {
+		// 打印错误消息，请求的块大小不合法
 		printk(KERN_ERR "getblk(): invalid block size %d requested\n",
 					size);
+		// 打印逻辑块大小
 		printk(KERN_ERR "logical block size: %d\n",
 					bdev_logical_block_size(bdev));
-
+		// 打印堆栈信息以帮助定位问题
 		dump_stack();
+		// 因为块大小不合法，返回NULL
 		return NULL;
 	}
 
-	for (;;) {
+	for (;;) {	// 无限循环尝试获取buffer_head
 		struct buffer_head * bh;
 		int ret;
 
+		// 尝试找到一个现有的buffer_head
 		bh = __find_get_block(bdev, block, size);
 		if (bh)
-			return bh;
+			return bh;	// 如果找到了，直接返回
 
+		// 尝试增加缓冲区来满足需求
 		ret = grow_buffers(bdev, block, size);
 		if (ret < 0)
-			return NULL;
+			return NULL;	// 如果增加缓冲区失败，返回NULL
 		if (ret == 0)
+			// 如果没有足够的空间增加缓冲区，尝试释放更多内存
 			free_more_memory();
 	}
 }
@@ -1219,18 +1228,26 @@ EXPORT_SYMBOL(__bforget);
 
 static struct buffer_head *__bread_slow(struct buffer_head *bh)
 {
+	// 锁定缓冲区，防止同时访问
 	lock_buffer(bh);
+	// 如果缓冲区已经是最新的，则解锁并返回
 	if (buffer_uptodate(bh)) {
 		unlock_buffer(bh);
 		return bh;
 	} else {
+		// 增加缓冲区的引用计数
 		get_bh(bh);
+		// 设置缓冲区的结束I/O函数，用于在读取完成后的处理
 		bh->b_end_io = end_buffer_read_sync;
+		// 提交缓冲区以进行读取
 		submit_bh(READ, bh);
+		// 等待缓冲区的读取完成
 		wait_on_buffer(bh);
+		// 如果读取完成后缓冲区数据是最新的，则返回缓冲区
 		if (buffer_uptodate(bh))
 			return bh;
 	}
+	// 释放缓冲区并返回NULL，表示读取失败
 	brelse(bh);
 	return NULL;
 }
@@ -1353,17 +1370,23 @@ lookup_bh_lru(struct block_device *bdev, sector_t block, unsigned size)
  * it in the LRU and mark it as accessed.  If it is not present then return
  * NULL
  */
+// 该函数用于在页面缓存中查找一个匹配的缓冲区。如果找到了，会在LRU列表中刷新它并标记为已访问。如果没有找到，则返回 NULL。
 struct buffer_head *
 __find_get_block(struct block_device *bdev, sector_t block, unsigned size)
 {
+	// 尝试通过LRU机制快速查找buffer_head
 	struct buffer_head *bh = lookup_bh_lru(bdev, block, size);
 
+	// 如果LRU查找未成功，尝试慢速路径查找
 	if (bh == NULL) {
+		// 如果慢速查找成功，将该buffer_head安装到LRU中
 		bh = __find_get_block_slow(bdev, block);
 		if (bh)
 			bh_lru_install(bh);
 	}
+	// 如果找到了buffer_head，更新它的访问时间
 	if (bh)
+		// 返回找到的buffer_head，如果都没找到则返回NULL
 		touch_buffer(bh);
 	return bh;
 }
@@ -1381,15 +1404,30 @@ EXPORT_SYMBOL(__find_get_block);
  * __getblk() will lock up the machine if grow_dev_page's try_to_free_buffers()
  * attempt is failing.  FIXME, perhaps?
  */
+/*
+ * __getblk 会定位（必要时创建）对应于传入的块设备、块号和大小的 buffer_head。
+ * 返回的缓冲区其引用计数被增加。
+ *
+ * __getblk() 不会失败 - 它会不断尝试。如果你传递一个非法的块号，__getblk()
+ * 会愉快地返回一个代表不存在的块的 buffer_head。这非常奇怪。
+ *
+ * 如果 grow_dev_page 的 try_to_free_buffers() 尝试失败，__getblk() 会锁定机器。
+ * 或许这是个需要修复的问题（FIXME）？
+ */
+// 接收块设备、块号和大小作为参数
 struct buffer_head *
 __getblk(struct block_device *bdev, sector_t block, unsigned size)
 {
+	// 尝试查找已存在的缓冲区头
 	struct buffer_head *bh = __find_get_block(bdev, block, size);
 
+	// 可能会休眠，因此确保不在原子上下文中调用
 	might_sleep();
+	// 如果没有找到缓冲区头
 	if (bh == NULL)
+		// 使用慢速方式获取缓冲区头
 		bh = __getblk_slow(bdev, block, size);
-	return bh;
+	return bh;	// 返回找到或创建的缓冲区头
 }
 EXPORT_SYMBOL(__getblk);
 
@@ -1415,14 +1453,26 @@ EXPORT_SYMBOL(__breadahead);
  *  Reads a specified block, and returns buffer head that contains it.
  *  It returns NULL if the block was unreadable.
  */
+/**
+ *  __bread() - 从指定的块设备读取一个指定的块，并返回包含该块的缓冲区头
+ *  @bdev: 要读取的块设备
+ *  @block: 块号
+ *  @size: 要读取的大小（字节）
+ * 
+ *  该函数读取指定的块，并返回一个包含该块的缓冲区头。
+ *  如果该块无法被读取，返回NULL。
+ */
 struct buffer_head *
 __bread(struct block_device *bdev, sector_t block, unsigned size)
 {
+	// 从块设备bdev获取编号为block、大小为size的块
 	struct buffer_head *bh = __getblk(bdev, block, size);
 
+	// 如果成功获取到缓冲区头，且缓冲区头的数据不是最新的
 	if (likely(bh) && !buffer_uptodate(bh))
+		 // 进行慢速读取，确保数据是最新的
 		bh = __bread_slow(bh);
-	return bh;
+	return bh;	// 返回包含数据的缓冲区头
 }
 EXPORT_SYMBOL(__bread);
 
@@ -1633,23 +1683,59 @@ EXPORT_SYMBOL(unmap_underlying_metadata);
  * which will ultimately call blk_run_backing_dev(), which will end up
  * unplugging the device queue.
  */
+/*
+ * 注意！所有映射/更新的组合都是有效的：
+ *
+ *	映射	更新	含义
+ *
+ *	否	否	"未知" - 必须执行get_block()
+ *	否	是	"空洞" - 已填充零
+ *	是	否	"已分配" - 已在磁盘上分配，未读入
+ *	是	是	"有效" - 已分配并在内存中更新。
+ *
+ * "脏"仅在最后一种情况（映射+更新）下有效。
+ */
+
+/*
+ * 当block_write_full_page正在写回页面下的脏缓冲区时，
+ * 弄脏缓冲区的任何人都可以随时决定再次清理它们。
+ * 我们通过仅在lock_buffer()内部查看缓冲区状态来处理这一点。
+ *
+ * 如果为常规写回调用block_write_full_page()
+ * (wbc->sync_mode == WB_SYNC_NONE)，那么它将重新脏化具有锁定缓冲区的页面。
+ * 这只能发生在有人直接通过submit_bh()写入缓冲区的情况。
+ * 在地址空间级别，PageWriteback阻止了这种争用的发生。
+ *
+ * 如果使用wbc->sync_mode == WB_SYNC_ALL调用block_write_full_page()，
+ * 写入使用WRITE_SYNC_PLUG标记; 这会导致写入被标记为同步写入，
+ * 但块设备队列将不会被拔出，因为通常许多页面将在更高级别的调用者实际等待
+ * 写入完成之前被推送出去。各种等待函数，如wait_on_writeback_range()，
+ * 最终将调用sync_page()，最终将调用blk_run_backing_dev()，从而最终拔出设备队列。
+ */
 static int __block_write_full_page(struct inode *inode, struct page *page,
 			get_block_t *get_block, struct writeback_control *wbc,
 			bh_end_io_t *handler)
 {
-	int err;
-	sector_t block;
-	sector_t last_block;
+	int err;	// 用于存储错误码
+	sector_t block;	// 当前处理的块的索引
+	sector_t last_block;	// 最后一个块的索引
+	 // 用于遍历页面内所有缓冲头的指针
 	struct buffer_head *bh, *head;
+	// 块大小
 	const unsigned blocksize = 1 << inode->i_blkbits;
+	// 正在处理的缓冲区数量
 	int nr_underway = 0;
+	// 写操作类型，决定是否使用插件式写入
 	int write_op = (wbc->sync_mode == WB_SYNC_ALL ?
 			WRITE_SYNC_PLUG : WRITE);
 
+	// 确保页面已锁定
 	BUG_ON(!PageLocked(page));
 
+	// 计算最后一个块的索引
 	last_block = (i_size_read(inode) - 1) >> inode->i_blkbits;
 
+	// 检查页面是否有缓冲区，没有则创建空缓冲区
 	if (!page_has_buffers(page)) {
 		create_empty_buffers(page, blocksize,
 					(1 << BH_Dirty)|(1 << BH_Uptodate));
@@ -1664,7 +1750,16 @@ static int __block_write_full_page(struct inode *inode, struct page *page,
 	 * Buffers outside i_size may be dirtied by __set_page_dirty_buffers;
 	 * handle that here by just cleaning them.
 	 */
+	/*
+	 * 非常小心。我们这里没有从__set_page_dirty_buffers中排除，
+	 * 而且（可能未映射的）缓冲区可能随时变脏。如果在我们检查后缓冲区变脏，
+	 * 那么我们就会错过这一事实，页面将保持脏状态。
+	 *
+	 * i_size之外的缓冲区可能会通过__set_page_dirty_buffers变脏；
+	 * 在这里通过清理它们来处理。
+	 */
 
+	// 初始化块索引
 	block = (sector_t)page->index << (PAGE_CACHE_SHIFT - inode->i_blkbits);
 	head = page_buffers(page);
 	bh = head;
@@ -1673,8 +1768,12 @@ static int __block_write_full_page(struct inode *inode, struct page *page,
 	 * Get all the dirty buffers mapped to disk addresses and
 	 * handle any aliases from the underlying blockdev's mapping.
 	 */
+	/*
+	 * 获取所有映射到磁盘地址的脏缓冲区，并处理来自底层块设备映射的任何别名。
+	 */
+	// 遍历所有缓冲区，处理每个缓冲区
 	do {
-		if (block > last_block) {
+		if (block > last_block) {	// 如果块索引超出文件大小
 			/*
 			 * mapped buffers outside i_size will occur, because
 			 * this page can be outside i_size when there is a
@@ -1683,18 +1782,28 @@ static int __block_write_full_page(struct inode *inode, struct page *page,
 			/*
 			 * The buffer was zeroed by block_write_full_page()
 			 */
-			clear_buffer_dirty(bh);
-			set_buffer_uptodate(bh);
+			/*
+			 * 如果页面在i_size之外，可能会发生映射缓冲区，
+			 * 因为当进行截断时，此页面可能在i_size之外。
+			 */
+			/*
+			 * 该缓冲区由block_write_full_page()清零
+			 */
+			clear_buffer_dirty(bh);	// 清除脏标记
+			set_buffer_uptodate(bh);	// 设置为更新状态
 		} else if ((!buffer_mapped(bh) || buffer_delay(bh)) &&
-			   buffer_dirty(bh)) {
-			WARN_ON(bh->b_size != blocksize);
+			   buffer_dirty(bh)) {	// 如果缓冲区未映射或延迟，并且是脏的
+			WARN_ON(bh->b_size != blocksize);	// 块大小不匹配警告
+			// 映射块
 			err = get_block(inode, block, bh, 1);
-			if (err)
+			if (err)	// 错误处理
 				goto recover;
-			clear_buffer_delay(bh);
-			if (buffer_new(bh)) {
+			clear_buffer_delay(bh);	// 清除延迟标记
+			if (buffer_new(bh)) {		// 如果是新块
 				/* blockdev mappings never come here */
-				clear_buffer_new(bh);
+				/* 块设备映射从不来这里 */
+				clear_buffer_new(bh);	// 清除新块标记
+				// 取消映射底层元数据
 				unmap_underlying_metadata(bh->b_bdev,
 							bh->b_blocknr);
 			}
@@ -1704,6 +1813,7 @@ static int __block_write_full_page(struct inode *inode, struct page *page,
 	} while (bh != head);
 
 	do {
+		// 如果缓冲区未映射，则跳过
 		if (!buffer_mapped(bh))
 			continue;
 		/*
@@ -1713,15 +1823,24 @@ static int __block_write_full_page(struct inode *inode, struct page *page,
 		 * and kswapd activity, but those code paths have their own
 		 * higher-level throttling.
 		 */
+		/*
+		 * 如果这是一个完全非阻塞的写入尝试，并且我们不能锁定缓冲区，
+		 * 则重新使页面变脏。注意，这可能导致来自写回线程和kswapd活动的
+		 * 忙等循环，但这些代码路径有自己的高级别节流。
+		 */
+		// 如果需要同步或非非阻塞模式
 		if (wbc->sync_mode != WB_SYNC_NONE || !wbc->nonblocking) {
-			lock_buffer(bh);
-		} else if (!trylock_buffer(bh)) {
+			lock_buffer(bh);	// 锁定缓冲区
+		} else if (!trylock_buffer(bh)) {	// 尝试锁定缓冲区，失败则重新脏化页面
 			redirty_page_for_writepage(wbc, page);
 			continue;
 		}
+		// 测试并清除脏标记
 		if (test_clear_buffer_dirty(bh)) {
+			// 标记为异步写并设置结束IO处理函数
 			mark_buffer_async_write_endio(bh, handler);
 		} else {
+			// 解锁缓冲区
 			unlock_buffer(bh);
 		}
 	} while ((bh = bh->b_this_page) != head);
@@ -1730,32 +1849,43 @@ static int __block_write_full_page(struct inode *inode, struct page *page,
 	 * The page and its buffers are protected by PageWriteback(), so we can
 	 * drop the bh refcounts early.
 	 */
+	/*
+	 * 页面及其缓冲区受PageWriteback()保护，因此我们可以提前删除bh引用计数。
+	 */
+	// 设置页面为写回状态
 	BUG_ON(PageWriteback(page));
 	set_page_writeback(page);
 
 	do {
 		struct buffer_head *next = bh->b_this_page;
-		if (buffer_async_write(bh)) {
-			submit_bh(write_op, bh);
-			nr_underway++;
+		if (buffer_async_write(bh)) {	// 如果缓冲区是异步写
+			submit_bh(write_op, bh);	// 提交缓冲头进行IO操作
+			nr_underway++;	// 正在处理的缓冲区数量增加
 		}
 		bh = next;
 	} while (bh != head);
-	unlock_page(page);
+	unlock_page(page);	// 解锁页面
 
-	err = 0;
+	err = 0;	// 设置错误码为0
 done:
-	if (nr_underway == 0) {
+	if (nr_underway == 0) {	// 如果没有正在进行的缓冲区
 		/*
 		 * The page was marked dirty, but the buffers were
 		 * clean.  Someone wrote them back by hand with
 		 * ll_rw_block/submit_bh.  A rare case.
 		 */
-		end_page_writeback(page);
+		/*
+		 * 页面被标记为脏，但缓冲区是干净的。有人用ll_rw_block/submit_bh手动
+		 * 写回了它们。这是一个罕见的情况。
+		 */
+		end_page_writeback(page);	// 结束页面的写回
 
 		/*
 		 * The page and buffer_heads can be released at any time from
 		 * here on.
+		 */
+		/*
+		 * 从这里开始，页面和缓冲区可以随时释放。
 		 */
 	}
 	return err;
@@ -1767,36 +1897,49 @@ recover:
 	 * exposing stale data.
 	 * The page is currently locked and not marked for writeback
 	 */
+	/*
+	 * ENOSPC或其他错误。我们可能已经向文件添加了一些块，所以我们需要将这些块
+	 * 写出以避免暴露陈旧数据。当前页面已锁定且未标记为写回。
+	 */
 	bh = head;
 	/* Recovery: lock and submit the mapped buffers */
+	/* 恢复：锁定并提交映射的缓冲区 */
 	do {
+		// 如果缓冲区已映射且脏
 		if (buffer_mapped(bh) && buffer_dirty(bh) &&
 		    !buffer_delay(bh)) {
-			lock_buffer(bh);
+			lock_buffer(bh);	// 锁定缓冲区
+			// 标记为异步写并设置结束IO处理函数
 			mark_buffer_async_write_endio(bh, handler);
 		} else {
 			/*
 			 * The buffer may have been set dirty during
 			 * attachment to a dirty page.
 			 */
-			clear_buffer_dirty(bh);
+			/*
+			 * 缓冲区可能在附加到脏页面时被设置为脏。
+			 */
+			clear_buffer_dirty(bh);	// 清除脏标记
 		}
 	} while ((bh = bh->b_this_page) != head);
-	SetPageError(page);
-	BUG_ON(PageWriteback(page));
+	SetPageError(page);	// 设置页面错误
+	BUG_ON(PageWriteback(page));	// 断言检查页面不应处于写回状态
+	// 设置页面映射的错误
 	mapping_set_error(page->mapping, err);
+	// 设置页面为写回状态
 	set_page_writeback(page);
 	do {
 		struct buffer_head *next = bh->b_this_page;
+		// 如果缓冲区是异步写
 		if (buffer_async_write(bh)) {
-			clear_buffer_dirty(bh);
-			submit_bh(write_op, bh);
-			nr_underway++;
+			clear_buffer_dirty(bh);	// 清除脏标记
+			submit_bh(write_op, bh);	// 提交缓冲头进行IO操作
+			nr_underway++;	// 正在处理的缓冲区数量增加
 		}
 		bh = next;
 	} while (bh != head);
-	unlock_page(page);
-	goto done;
+	unlock_page(page);	// 解锁页面
+	goto done;	// 跳转到完成处理部分
 }
 
 /*
@@ -1841,55 +1984,83 @@ void page_zero_new_buffers(struct page *page, unsigned from, unsigned to)
 }
 EXPORT_SYMBOL(page_zero_new_buffers);
 
+/**
+ * 1. **检查条件**：确保页面已锁定，起始和结束位置在页缓存大小范围内，并且起始位置不大于结束位置。
+ * 2. **页面缓冲区初始化**：如果页面没有缓冲区，为其创建空缓冲区。
+ * 3. **遍历所有缓冲区**：对于页面中的每个缓冲区，根据需要更新或映射。
+ * - 如果缓冲区的位置在要写的范围之外，只更新状态。
+ * - 对于需要写入的部分，如果缓冲区未映射，则尝试映射它。
+ * - 对于新映射的缓冲区，如果所在页面已更新，直接标记缓冲区已更新；如果是新分配的块，可能需要对其进行初始化。
+ * 4. **处理直接I/O请求**：如果发出了读取请求（对未更新的缓冲区进行读取以填充数据），则等待这些请求完成，并检查结果。
+ * 5. **异常处理**：如果在任何步骤中遇到错误（例如映射失败或读取失败），则清除页面中受影响部分的内容，并返回错误码。
+ * 
+ * 此函数主要在文件系统中实现写入操作前的准备工作，包括分配和映射块、处理部分写入和同步页面内容。
+ */
 static int __block_prepare_write(struct inode *inode, struct page *page,
 		unsigned from, unsigned to, get_block_t *get_block)
 {
+	// 块起始和结束位置
 	unsigned block_start, block_end;
-	sector_t block;
-	int err = 0;
+	sector_t block;	// 块号
+	int err = 0;		// 错误码初始化为0
+	// 块大小和块位数
 	unsigned blocksize, bbits;
+	// 缓冲头结构体
 	struct buffer_head *bh, *head, *wait[2], **wait_bh=wait;
 
-	BUG_ON(!PageLocked(page));
-	BUG_ON(from > PAGE_CACHE_SIZE);
-	BUG_ON(to > PAGE_CACHE_SIZE);
-	BUG_ON(from > to);
+	BUG_ON(!PageLocked(page));	// 确保页面被锁定
+	BUG_ON(from > PAGE_CACHE_SIZE);	// 起始位置不能超过页缓存大小
+	BUG_ON(to > PAGE_CACHE_SIZE);		// 结束位置不能超过页缓存大小
+	BUG_ON(from > to);	// 起始位置不能大于结束位置
 
+	// 计算块大小
 	blocksize = 1 << inode->i_blkbits;
+	// 如果页面没有缓冲区，则创建
 	if (!page_has_buffers(page))
 		create_empty_buffers(page, blocksize, 0);
+	// 获取页面的第一个缓冲区头
 	head = page_buffers(page);
 
-	bbits = inode->i_blkbits;
+	bbits = inode->i_blkbits;	// 获取块位数
+	// 计算块号
 	block = (sector_t)page->index << (PAGE_CACHE_SHIFT - bbits);
 
 	for(bh = head, block_start = 0; bh != head || !block_start;
 	    block++, block_start=block_end, bh = bh->b_this_page) {
+		// 计算块结束位置
 		block_end = block_start + blocksize;
 		if (block_end <= from || block_start >= to) {
-			if (PageUptodate(page)) {
+			if (PageUptodate(page)) {	// 如果页面是最新的
 				if (!buffer_uptodate(bh))
+					// 设置缓冲区为最新
 					set_buffer_uptodate(bh);
 			}
 			continue;
 		}
+		// 如果是新缓冲区，清除新缓冲区标记
 		if (buffer_new(bh))
 			clear_buffer_new(bh);
+		// 如果缓冲区没有映射
 		if (!buffer_mapped(bh)) {
+			// 警告块大小不一致
 			WARN_ON(bh->b_size != blocksize);
+			// 获取块映射
 			err = get_block(inode, block, bh, 1);
 			if (err)
 				break;
 			if (buffer_new(bh)) {
+				// 取消元数据映射
 				unmap_underlying_metadata(bh->b_bdev,
 							bh->b_blocknr);
 				if (PageUptodate(page)) {
 					clear_buffer_new(bh);
 					set_buffer_uptodate(bh);
+					// 标记缓冲区为脏
 					mark_buffer_dirty(bh);
 					continue;
 				}
 				if (block_end > to || block_start < from)
+					// 清零用户段
 					zero_user_segments(page,
 						to, block_end,
 						block_start, from);
@@ -1898,51 +2069,65 @@ static int __block_prepare_write(struct inode *inode, struct page *page,
 		}
 		if (PageUptodate(page)) {
 			if (!buffer_uptodate(bh))
+				// 设置缓冲区为最新
 				set_buffer_uptodate(bh);
 			continue; 
 		}
 		if (!buffer_uptodate(bh) && !buffer_delay(bh) &&
 		    !buffer_unwritten(bh) &&
 		     (block_start < from || block_end > to)) {
-			ll_rw_block(READ, 1, &bh);
-			*wait_bh++=bh;
+			ll_rw_block(READ, 1, &bh);	// 读取块
+			*wait_bh++=bh;		// 添加到等待列表
 		}
 	}
 	/*
 	 * If we issued read requests - let them complete.
 	 */
+	/*
+	 * 如果发出了读请求 - 等待它们完成。
+	 */
 	while(wait_bh > wait) {
+		 // 等待缓冲区的I/O操作完成
 		wait_on_buffer(*--wait_bh);
+		 // 如果缓冲区未更新成功，则返回I/O错误
 		if (!buffer_uptodate(*wait_bh))
 			err = -EIO;
 	}
+	// 如果出错，则将新缓冲区区间清零
 	if (unlikely(err))
 		page_zero_new_buffers(page, from, to);
-	return err;
+	return err;	// 返回处理结果
 }
 
+// 在写操作完成后提交对页面的更改。该函数处理页面内的每个缓冲头，更新它们的状态，
+// 并确保如果页面完全更新，则将其标记为最新。这有助于优化后续的文件访问操作，避免不必要的磁盘读取。
 static int __block_commit_write(struct inode *inode, struct page *page,
 		unsigned from, unsigned to)
 {
 	unsigned block_start, block_end;
-	int partial = 0;
-	unsigned blocksize;
+	int partial = 0;	// 部分写入的标记
+	unsigned blocksize;	// 块大小
+	// 缓冲头指针
 	struct buffer_head *bh, *head;
 
+	// 计算块大小
 	blocksize = 1 << inode->i_blkbits;
 
+	// 遍历页面中的所有缓冲头
 	for(bh = head = page_buffers(page), block_start = 0;
 	    bh != head || !block_start;
 	    block_start=block_end, bh = bh->b_this_page) {
 		block_end = block_start + blocksize;
+		// 如果当前块不在写入区域内
 		if (block_end <= from || block_start >= to) {
+			// 如果缓冲块不是最新的，标记为部分写入
 			if (!buffer_uptodate(bh))
 				partial = 1;
-		} else {
-			set_buffer_uptodate(bh);
-			mark_buffer_dirty(bh);
+		} else {	// 如果当前块在写入区域内
+			set_buffer_uptodate(bh);	// 标记缓冲块为最新的
+			mark_buffer_dirty(bh);		// 标记缓冲块为脏的
 		}
-		clear_buffer_new(bh);
+		clear_buffer_new(bh);				// 清除缓冲块的“新”状态
 	}
 
 	/*
@@ -1951,9 +2136,14 @@ static int __block_commit_write(struct inode *inode, struct page *page,
 	 * the next read(). Here we 'discover' whether the page went
 	 * uptodate as a result of this (potentially partial) write.
 	 */
+	/*
+	 * 如果这是一个部分写入并且导致所有缓冲块都为最新的，那么我们可以优化掉
+	 * 下一次读取时的无效readpage()调用。这里我们“发现”页面是否因为这次
+	 * （可能是部分的）写入而变为最新的。
+	 */w
 	if (!partial)
-		SetPageUptodate(page);
-	return 0;
+		SetPageUptodate(page);	// 如果没有部分写入，标记页面为最新的
+	return 0;	// 返回成功
 }
 
 /*
@@ -1964,41 +2154,60 @@ static int __block_commit_write(struct inode *inode, struct page *page,
  * at *pagep rather than allocating its own. In this case, the page will
  * not be unlocked or deallocated on failure.
  */
+/*
+ * block_write_begin 负责块分配的基本任务，并首先将部分写入块更新到最新状态。
+ *
+ * 如果 *pagep 不是 NULL，则 block_write_begin 使用 *pagep 中的锁定页面，
+ * 而不是分配自己的页面。在这种情况下，失败时页面不会被解锁或释放。
+ */
 int block_write_begin(struct file *file, struct address_space *mapping,
 			loff_t pos, unsigned len, unsigned flags,
 			struct page **pagep, void **fsdata,
 			get_block_t *get_block)
 {
+	// 获取映射关联的inode结构
 	struct inode *inode = mapping->host;
-	int status = 0;
-	struct page *page;
-	pgoff_t index;
-	unsigned start, end;
-	int ownpage = 0;
+	int status = 0;	// 初始化状态变量
+	struct page *page;	// 用于操作的页面指针
+	pgoff_t index;			// 页面索引
+	unsigned start, end;	// 写入操作的开始和结束位置
+	int ownpage = 0;			// 标记是否拥有页面
 
+	// 计算页内偏移
 	index = pos >> PAGE_CACHE_SHIFT;
+	// 计算开始位置在页面中的偏移
 	start = pos & (PAGE_CACHE_SIZE - 1);
+	// 计算结束位置
 	end = start + len;
 
-	page = *pagep;
-	if (page == NULL) {
-		ownpage = 1;
+	page = *pagep;	// 获取传入的页面指针
+	if (page == NULL) {	// 如果页面不存在，需要新获取一个页面
+		ownpage = 1;	// 标记自己拥有页面
+		// 尝试获取缓存页面
 		page = grab_cache_page_write_begin(mapping, index, flags);
 		if (!page) {
+			// 页面获取失败，返回内存不足错误
 			status = -ENOMEM;
 			goto out;
 		}
 		*pagep = page;
 	} else
+	 	// 如果页面已存在，确保该页面已被锁定
 		BUG_ON(!PageLocked(page));
 
+	 // 准备写入，设置必要的缓冲区头部等
 	status = __block_prepare_write(inode, page, start, end, get_block);
+	// 如果准备写入失败，清除页面的更新状态
 	if (unlikely(status)) {
 		ClearPageUptodate(page);
 
+		// 如果是函数内部分配的页面
 		if (ownpage) {
+			// 解锁页面
 			unlock_page(page);
+			// 释放页面引用
 			page_cache_release(page);
+			// 清空页面指针
 			*pagep = NULL;
 
 			/*
@@ -2006,7 +2215,13 @@ int block_write_begin(struct file *file, struct address_space *mapping,
 			 * outside i_size.  Trim these off again. Don't need
 			 * i_size_read because we hold i_mutex.
 			 */
+			/*
+		 * prepare_write() 可能已经实例化了一些超出 i_size 的块。
+		 * 如果发生这种情况，需要再次修剪它们。不需要 i_size_read，
+		 * 因为我们持有 i_mutex。
+		 */
 			if (pos + len > inode->i_size)
+				// 调整文件大小以匹配实际写入的数据
 				vmtruncate(inode, inode->i_size);
 		}
 	}
@@ -2016,13 +2231,16 @@ out:
 }
 EXPORT_SYMBOL(block_write_begin);
 
+// 主要负责文件的写操作结束部分。block_write_end 函数处理实际的写入结束逻辑，包括处理短写和页不最新的情况。
 int block_write_end(struct file *file, struct address_space *mapping,
 			loff_t pos, unsigned len, unsigned copied,
 			struct page *page, void *fsdata)
 {
+	// 获取inode对象，该inode与写入的文件关联
 	struct inode *inode = mapping->host;
 	unsigned start;
 
+	// 计算页内偏移
 	start = pos & (PAGE_CACHE_SIZE - 1);
 
 	if (unlikely(copied < len)) {
@@ -2038,27 +2256,42 @@ int block_write_end(struct file *file, struct address_space *mapping,
 		 * non uptodate page as a zero-length write, and force the
 		 * caller to redo the whole thing.
 		 */
+		/*
+		 * 已写入的缓冲区现在将是最新的，因此我们不必担心readpage读取它们并
+		 * 覆盖部分写入。但是，如果我们遇到短写并且只部分写入缓冲区，则它将不会
+		 * 标记为最新，因此readpage可能进入并破坏我们的部分写入。
+		 *
+		 * 做最简单的事情，对未更新页面的任何短写都视为零长度写入，并强制调用者
+		 * 重新执行整个操作。
+		 */
+		// 如果页面不是最新的，将复制长度设置为0
 		if (!PageUptodate(page))
 			copied = 0;
 
 		page_zero_new_buffers(page, start+copied, start+len);
 	}
+	// 清零页面中新缓冲区的剩余部分
 	flush_dcache_page(page);
 
 	/* This could be a short (even 0-length) commit */
+	/* 这可能是一个短的（甚至是0长度的）提交 */
+	// 提交写入操作
 	__block_commit_write(inode, page, start, start+copied);
 
-	return copied;
+	return copied;	// 返回复制的字节数
 }
 EXPORT_SYMBOL(block_write_end);
 
+// 通用的写结束处理函数，它首先调用 block_write_end 函数，然后处理文件大小的更新和释放资源等后续操作。
 int generic_write_end(struct file *file, struct address_space *mapping,
 			loff_t pos, unsigned len, unsigned copied,
 			struct page *page, void *fsdata)
 {
+	// 获取inode对象
 	struct inode *inode = mapping->host;
-	int i_size_changed = 0;
+	int i_size_changed = 0;	// 文件大小改变标志
 
+	// 调用block_write_end进行写入操作
 	copied = block_write_end(file, mapping, pos, len, copied, page, fsdata);
 
 	/*
@@ -2068,13 +2301,18 @@ int generic_write_end(struct file *file, struct address_space *mapping,
 	 * But it's important to update i_size while still holding page lock:
 	 * page writeout could otherwise come in and zero beyond i_size.
 	 */
+	/*
+	 * 这里不需要使用i_size_read()，因为i_size在我们持有i_mutex的情况下不能更改。
+	 *
+	 * 但在仍持有页锁的情况下更新i_size很重要：否则页面写出可能会进入并在i_size之后归零。
+	 */
 	if (pos+copied > inode->i_size) {
-		i_size_write(inode, pos+copied);
-		i_size_changed = 1;
+		i_size_write(inode, pos+copied);	// 更新inode的i_size
+		i_size_changed = 1;	// 标记文件大小已更改
 	}
 
-	unlock_page(page);
-	page_cache_release(page);
+	unlock_page(page);	// 解锁页面
+	page_cache_release(page);	// 释放页面缓存
 
 	/*
 	 * Don't mark the inode dirty under page lock. First, it unnecessarily
@@ -2082,10 +2320,15 @@ int generic_write_end(struct file *file, struct address_space *mapping,
 	 * ordering of page lock and transaction start for journaling
 	 * filesystems.
 	 */
+	/*
+	 * 不要在持有页锁的情况下标记inode为脏。首先，它不必要地延长了持有页锁的时间。
+	 * 其次，对于日志文件系统，它强制了页锁和事务开始的锁定顺序。
+	 */
+	// 如果文件大小已更改，将inode标记为脏
 	if (i_size_changed)
 		mark_inode_dirty(inode);
 
-	return copied;
+	return copied;	// 返回复制的字节数
 }
 EXPORT_SYMBOL(generic_write_end);
 
@@ -2865,29 +3108,45 @@ EXPORT_SYMBOL(block_truncate_page);
  * The generic ->writepage function for buffer-backed address_spaces
  * this form passes in the end_io handler used to finish the IO.
  */
+/*
+ * 通用的 ->writepage 函数用于支持缓冲区的地址空间，
+ * 本形式传入了用于完成 IO 的 end_io 处理函数。
+ */
 int block_write_full_page_endio(struct page *page, get_block_t *get_block,
 			struct writeback_control *wbc, bh_end_io_t *handler)
 {
+	// 从页的映射获取关联的inode结构
 	struct inode * const inode = page->mapping->host;
+	// 读取inode的大小
 	loff_t i_size = i_size_read(inode);
+	// 计算索引页的终点
 	const pgoff_t end_index = i_size >> PAGE_CACHE_SHIFT;
 	unsigned offset;
 
 	/* Is the page fully inside i_size? */
+	/* 检查页面是否完全位于 i_size 内 */
 	if (page->index < end_index)
+		// 如果是，则调用底层写入函数
 		return __block_write_full_page(inode, page, get_block, wbc,
 					       handler);
 
 	/* Is the page fully outside i_size? (truncate in progress) */
-	offset = i_size & (PAGE_CACHE_SIZE-1);
+	/* 页面是否完全在 i_size 外部？（正在进行截断） */
+	offset = i_size & (PAGE_CACHE_SIZE-1);	// 获取i_size的偏移量
 	if (page->index >= end_index+1 || !offset) {
 		/*
 		 * The page may have dirty, unmapped buffers.  For example,
 		 * they may have been added in ext3_writepage().  Make them
 		 * freeable here, so the page does not leak.
 		 */
-		do_invalidatepage(page, 0);
-		unlock_page(page);
+		/*
+		 * 页面可能有脏的、未映射的缓冲区。例如，
+		 * 它们可能已经在 ext3_writepage() 中被添加。
+		 * 在这里使它们可释放，以便页面不会泄漏。
+		 */
+		do_invalidatepage(page, 0);	// 使页面无效
+		unlock_page(page);	// 解锁页面
+		// 不关心结果
 		return 0; /* don't care */
 	}
 
@@ -2898,7 +3157,15 @@ int block_write_full_page_endio(struct page *page, get_block_t *get_block,
 	 * the  page size, the remaining memory is zeroed when mapped, and
 	 * writes to that region are not written out to the file."
 	 */
+	/*
+	 * 页面跨越了 i_size。每次调用 writepage 时必须将其清零，
+	 * 因为它可能被内存映射了。"文件被映射为页面大小的整数倍。
+	 * 对于不是页面大小倍数的文件，映射时剩余的内存将被清零，
+	 * 并且对该区域的写入不会写出到文件。"
+	 */
+	// 清零跨越部分
 	zero_user_segment(page, offset, PAGE_CACHE_SIZE);
+	// 再次尝试写入页面
 	return __block_write_full_page(inode, page, get_block, wbc, handler);
 }
 EXPORT_SYMBOL(block_write_full_page_endio);
@@ -2906,48 +3173,66 @@ EXPORT_SYMBOL(block_write_full_page_endio);
 /*
  * The generic ->writepage function for buffer-backed address_spaces
  */
+/*
+ * 通用的 ->writepage 函数用于支持缓冲区的地址空间
+ */
 int block_write_full_page(struct page *page, get_block_t *get_block,
 			struct writeback_control *wbc)
 {
+	// 调用带 end_io 处理函数的版本
 	return block_write_full_page_endio(page, get_block, wbc,
 					   end_buffer_async_write);
 }
 EXPORT_SYMBOL(block_write_full_page);
 
+/*
+ * 计算文件的逻辑块映射到磁盘上的哪个物理块
+ */
 sector_t generic_block_bmap(struct address_space *mapping, sector_t block,
 			    get_block_t *get_block)
 {
 	struct buffer_head tmp;
+	// 从地址空间映射中获取 inode
 	struct inode *inode = mapping->host;
-	tmp.b_state = 0;
-	tmp.b_blocknr = 0;
+	tmp.b_state = 0;		// 初始化缓冲头的状态
+	tmp.b_blocknr = 0;	// 初始化块号
+	// 设置缓冲头的大小
 	tmp.b_size = 1 << inode->i_blkbits;
+	// 获取块的映射
 	get_block(inode, block, &tmp, 0);
+	// 返回映射后的块号
 	return tmp.b_blocknr;
 }
 EXPORT_SYMBOL(generic_block_bmap);
 
+// 在I/O操作完成后被调用，根据操作结果设置缓冲头状态，并释放bio。
 static void end_bio_bh_io_sync(struct bio *bio, int err)
 {
 	struct buffer_head *bh = bio->bi_private;
-
+	
+	// 如果发生错误"EOPNOTSUPP"，设置相关的错误状态标记
 	if (err == -EOPNOTSUPP) {
 		set_bit(BIO_EOPNOTSUPP, &bio->bi_flags);
 		set_bit(BH_Eopnotsupp, &bh->b_state);
 	}
 
+	// 如果设置了BIO_QUIET标志，设置BH_Quiet状态
 	if (unlikely (test_bit(BIO_QUIET,&bio->bi_flags)))
 		set_bit(BH_Quiet, &bh->b_state);
 
+	// 调用b_end_io回调函数来结束处理，并根据BIO_UPTODATE位来判断是否成功
 	bh->b_end_io(bh, test_bit(BIO_UPTODATE, &bio->bi_flags));
+	// 释放bio结构
 	bio_put(bio);
 }
 
+// submit_bh初始化和提交bio结构以进行I/O操作。它处理缓冲头状态，确定是否添加写屏障，并在完成后释放bio。
 int submit_bh(int rw, struct buffer_head * bh)
 {
 	struct bio *bio;
 	int ret = 0;
 
+	// 检查缓冲头的一致性
 	BUG_ON(!buffer_locked(bh));
 	BUG_ON(!buffer_mapped(bh));
 	BUG_ON(!bh->b_end_io);
@@ -2958,12 +3243,14 @@ int submit_bh(int rw, struct buffer_head * bh)
 	 * Mask in barrier bit for a write (could be either a WRITE or a
 	 * WRITE_SYNC
 	 */
+	// 对写入操作添加写屏障
 	if (buffer_ordered(bh) && (rw & WRITE))
 		rw |= WRITE_BARRIER;
 
 	/*
 	 * Only clear out a write error when rewriting
 	 */
+	// 清除写错误标记以重新写入
 	if (test_set_buffer_req(bh) && (rw & WRITE))
 		clear_buffer_write_io_error(bh);
 
@@ -2971,8 +3258,10 @@ int submit_bh(int rw, struct buffer_head * bh)
 	 * from here on down, it's all bio -- do the initial mapping,
 	 * submit_bio -> generic_make_request may further map this bio around
 	 */
+	// 分配bio结构，设置其字段，为数据传输做准备
 	bio = bio_alloc(GFP_NOIO, 1);
 
+	// 设置扇区号和设备
 	bio->bi_sector = bh->b_blocknr * (bh->b_size >> 9);
 	bio->bi_bdev = bh->b_bdev;
 	bio->bi_io_vec[0].bv_page = bh->b_page;
@@ -2986,12 +3275,15 @@ int submit_bh(int rw, struct buffer_head * bh)
 	bio->bi_end_io = end_bio_bh_io_sync;
 	bio->bi_private = bh;
 
+	// 提交bio进行I/O操作
 	bio_get(bio);
 	submit_bio(rw, bio);
 
+	// 检查是否支持该操作
 	if (bio_flagged(bio, BIO_EOPNOTSUPP))
 		ret = -EOPNOTSUPP;
 
+	// 释放bio结构
 	bio_put(bio);
 	return ret;
 }

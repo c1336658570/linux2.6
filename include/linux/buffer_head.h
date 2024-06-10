@@ -322,9 +322,19 @@ static inline void bforget(struct buffer_head *bh)
 		__bforget(bh);
 }
 
+/**
+ * sb_bread() - 从指定的文件系统超级块读取一个块，并返回包含该块的缓冲区头
+ * @sb: 指向文件系统超级块的指针
+ * @block: 要读取的块号
+ * 
+ * 该函数封装了 __bread 函数，通过给定的超级块信息和块号，读取相应的块。
+ * 它使用超级块所在的块设备和块大小来调用 __bread 函数。
+ */
+// 参数为超级块和块号
 static inline struct buffer_head *
 sb_bread(struct super_block *sb, sector_t block)
 {
+	// 调用 __bread 函数，传入超级块的块设备、块号和块大小
 	return __bread(sb->s_bdev, block, sb->s_blocksize);
 }
 

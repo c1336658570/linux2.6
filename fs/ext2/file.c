@@ -30,11 +30,18 @@
  * for a single struct file are closed. Note that different open() calls
  * for the same file yield different struct file structures.
  */
+/*
+ * 当 filp 被释放时调用。这发生在单个 struct file 的所有文件描述符关闭时。
+ * 注意，针对同一个文件的不同 open() 调用会产生不同的 struct file 结构体。
+ */
 static int ext2_release_file (struct inode * inode, struct file * filp)
 {
 	if (filp->f_mode & FMODE_WRITE) {
+		// 锁定截断互斥锁
 		mutex_lock(&EXT2_I(inode)->truncate_mutex);
+		// 丢弃保留区域
 		ext2_discard_reservation(inode);
+		// 解锁截断互斥锁
 		mutex_unlock(&EXT2_I(inode)->truncate_mutex);
 	}
 	return 0;
@@ -46,9 +53,12 @@ int ext2_fsync(struct file *file, struct dentry *dentry, int datasync)
 	struct super_block *sb = dentry->d_inode->i_sb;
 	struct address_space *mapping = sb->s_bdev->bd_inode->i_mapping;
 
+	// 简单的同步操作
 	ret = simple_fsync(file, dentry, datasync);
 	if (ret == -EIO || test_and_clear_bit(AS_EIO, &mapping->flags)) {
 		/* We don't really know where the IO error happened... */
+		/* 我们并不确切知道 IO 错误发生在何处... */
+		// 记录 IO 错误
 		ext2_error(sb, __func__,
 			   "detected IO error when writing metadata buffers");
 		ret = -EIO;
@@ -60,21 +70,37 @@ int ext2_fsync(struct file *file, struct dentry *dentry, int datasync)
  * We have mostly NULL's here: the current defaults are ok for
  * the ext2 filesystem.
  */
+/*
+ * 这里大部分是 NULL：当前默认值对于 ext2 文件系统来说是可以的。
+ */
 const struct file_operations ext2_file_operations = {
+	// 通用文件偏移定位
 	.llseek		= generic_file_llseek,
+	// 同步读
 	.read		= do_sync_read,
+	// 同步写
 	.write		= do_sync_write,
+	// 异步 IO 读
 	.aio_read	= generic_file_aio_read,
+	// 异步 IO 写
 	.aio_write	= generic_file_aio_write,
+	// ioctl 操作
 	.unlocked_ioctl = ext2_ioctl,
 #ifdef CONFIG_COMPAT
+	// 兼容模式的 ioctl 操作
 	.compat_ioctl	= ext2_compat_ioctl,
 #endif
+	// 文件映射
 	.mmap		= generic_file_mmap,
+	// 打开文件时处理磁盘配额
 	.open		= dquot_file_open,
+	// 释放文件
 	.release	= ext2_release_file,
+	// 文件同步
 	.fsync		= ext2_fsync,
+	// 利用 splice 进行的读操作
 	.splice_read	= generic_file_splice_read,
+	// 利用 splice 进行的写操作
 	.splice_write	= generic_file_splice_write,
 };
 

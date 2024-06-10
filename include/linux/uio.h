@@ -15,7 +15,11 @@
 
 struct iovec
 {
+	/* BSD 使用 caddr_t (1003.1g 要求使用 void *) */
+	// 指向数据缓冲区的起始地址的指针。注释说明 BSD 系统使用 caddr_t 类型，但 POSIX.1g 标准要求使用 void * 类型以提高通用性和兼容性。
 	void __user *iov_base;	/* BSD uses caddr_t (1003.1g requires void *) */
+	/* 必须是 size_t (1003.1g) */
+	// 表示缓冲区的长度，类型为 __kernel_size_t，它基于系统标准定义应当是 size_t 类型。size_t 类型确保了长度值的兼容性和足够的数据容量，以便支持各种大小的数据。
 	__kernel_size_t iov_len; /* Must be size_t (1003.1g) */
 };
 

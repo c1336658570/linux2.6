@@ -9,10 +9,11 @@
 
 #include <asm/atomic.h>
 
+/* 定义 AIO 相关常数 */
 #define AIO_MAXSEGS		4
 #define AIO_KIOGRP_NR_ATOMIC	8
 
-struct kioctx;
+struct kioctx;	// 前向声明，用于引用 AIO 上下文
 
 /* Notes on cancelling a kiocb:
  *	If a kiocb is cancelled, aio_complete may return 0 to indicate 
@@ -20,18 +21,25 @@ struct kioctx;
  *	operations *must* call aio_put_req to dispose of the kiocb 
  *	to guard against races with the completion code.
  */
+/* kiocb 的取消注释：
+ * 如果一个 kiocb 被取消了，aio_complete 可能返回 0，表示取消操作还没有完成对 kiocb 的处理。
+ * 所有的取消操作必须调用 aio_put_req 以处理 kiocb，以防止与完成代码的竞争。
+ */
 #define KIOCB_C_CANCELLED	0x01
 #define KIOCB_C_COMPLETE	0x02
 
+// 用作特殊的同步键值
 #define KIOCB_SYNC_KEY		(~0U)
 
 /* ki_flags bits */
+/* ki_flags 位标志 */
 /*
  * This may be used for cancel/retry serialization in the future, but
  * for now it's unused and we probably don't want modules to even
  * think they can use it.
  */
 /* #define KIF_LOCKED		0 */
+/* kiocb 锁操作宏 */
 #define KIF_KICKED		1
 #define KIF_CANCELLED		2
 
@@ -84,37 +92,62 @@ struct kioctx;
  * once.  ki_retry must ensure forward progress, the AIO core will wait
  * indefinitely for kick_iocb() to be called.
  */
+/* kiocb 结构体定义 */
 struct kiocb {
+	// 运行列表
 	struct list_head	ki_run_list;
+	// 标志位
 	unsigned long		ki_flags;
+	// 用户计数
 	int			ki_users;
+	// 请求的 ID
 	unsigned		ki_key;		/* id of this request */
 
+	// 文件指针
 	struct file		*ki_filp;
+	// AIO 上下文，对于同步操作可能为 NULL
 	struct kioctx		*ki_ctx;	/* may be NULL for sync ops */
+	// 取消函数
 	int			(*ki_cancel)(struct kiocb *, struct io_event *);
+	// 重试回调，用于推动 AIO 操作前进
 	ssize_t			(*ki_retry)(struct kiocb *);
+	// 析构函数
 	void			(*ki_dtor)(struct kiocb *);
 
 	union {
+		// 用户空间指针
 		void __user		*user;
+		// 任务结构体指针
 		struct task_struct	*tsk;
 	} ki_obj;
 
+	// 用户完成数据
 	__u64			ki_user_data;	/* user's data for completion */
+	// 文件操作位置
 	loff_t			ki_pos;
 
+	// 私有数据
 	void			*private;
 	/* State that we remember to be able to restart/retry  */
+	/* 状态数据，用于重启/重试 */
+	// 操作码
 	unsigned short		ki_opcode;
+	// nbytes的副本
 	size_t			ki_nbytes; 	/* copy of iocb->aio_nbytes */
+	// 剩余的 buf
 	char 			__user *ki_buf;	/* remaining iocb->aio_buf */
+	// 剩余字节数
 	size_t			ki_left; 	/* remaining bytes */
+	// 内联向量
 	struct iovec		ki_inline_vec;	/* inline vector */
+	// iovec 指针
  	struct iovec		*ki_iovec;
+	// 段数
  	unsigned long		ki_nr_segs;
+	// 当前段
  	unsigned long		ki_cur_seg;
 
+	// AIO 核心使用的列表，用于取消
 	struct list_head	ki_list;	/* the aio core uses this
 						 * for cancellation */
 
@@ -122,6 +155,7 @@ struct kiocb {
 	 * If the aio_resfd field of the userspace iocb is not zero,
 	 * this is the underlying eventfd context to deliver events to.
 	 */
+	// 事件文件描述符上下文，用于事件通知
 	struct eventfd_ctx	*ki_eventfd;
 };
 

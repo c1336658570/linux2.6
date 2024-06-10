@@ -209,36 +209,72 @@ static int sync_page_killable(void *word)
  * these two operations is that if a dirty page/buffer is encountered, it must
  * be waited upon, and not just skipped over.
  */
+/**
+ * __filemark_fdatawrite_range - 开始对映射中范围内的脏页面进行写回
+ * @mapping:	需要写回的地址空间结构
+ * @start:	范围开始的字节偏移
+ * @end:	范围结束的字节偏移（包含在内）
+ * @sync_mode:	启用同步操作
+ *
+ * 对地址空间中位于字节偏移 <start, end>（包括边界）内的所有脏页面开始写回操作。
+ *
+ * 如果 sync_mode 是 WB_SYNC_ALL，则这是一个“数据完整性”操作，与普通的内存清理写回不同。
+ * 这两种操作的区别在于，如果遇到脏页/缓冲区，必须等待它，而不是简单地跳过。
+ */
 int __filemap_fdatawrite_range(struct address_space *mapping, loff_t start,
 				loff_t end, int sync_mode)
 {
 	int ret;
+	// 初始化写回控制结构
 	struct writeback_control wbc = {
-		.sync_mode = sync_mode,
-		.nr_to_write = LONG_MAX,
-		.range_start = start,
-		.range_end = end,
+		.sync_mode = sync_mode,		// 设置同步模式
+		.nr_to_write = LONG_MAX,	// 设置要写回的页数为最大，即尽可能多地写回
+		.range_start = start,			// 设置写回范围的起始位置
+		.range_end = end,					// 设置写回范围的结束位置
 	};
 
+	// 如果映射的地址空间不支持写回脏页，则直接返回
 	if (!mapping_cap_writeback_dirty(mapping))
 		return 0;
 
+	// 执行写回操作
 	ret = do_writepages(mapping, &wbc);
 	return ret;
 }
 
+/**
+ * __filemap_fdatawrite - 执行映射写回的辅助函数
+ * @mapping: 目标地址空间
+ * @sync_mode: 同步模式
+ * 
+ * 此内联函数调用 __filemap_fdatawrite_range 函数来写回从起始位置到最大长整数范围内的所有脏页面。
+ */
 static inline int __filemap_fdatawrite(struct address_space *mapping,
 	int sync_mode)
 {
 	return __filemap_fdatawrite_range(mapping, 0, LLONG_MAX, sync_mode);
 }
 
+/**
+ * filemap_fdatawrite - 启动对所有脏页面的写回
+ * @mapping: 目标地址空间
+ * 
+ * 此函数用于启动对地址空间中所有脏页面的数据完整性写回。
+ */
 int filemap_fdatawrite(struct address_space *mapping)
 {
 	return __filemap_fdatawrite(mapping, WB_SYNC_ALL);
 }
 EXPORT_SYMBOL(filemap_fdatawrite);
 
+/**
+ * filemap_fdatawrite_range - 启动对特定范围内所有脏页面的写回
+ * @mapping: 目标地址空间
+ * @start: 起始字节偏移
+ * @end: 结束字节偏移
+ * 
+ * 此函数用于启动对地址空间中特定范围内所有脏页面的数据完整性写回。
+ */
 int filemap_fdatawrite_range(struct address_space *mapping, loff_t start,
 				loff_t end)
 {
@@ -252,6 +288,13 @@ EXPORT_SYMBOL(filemap_fdatawrite_range);
  *
  * This is a mostly non-blocking flush.  Not suitable for data-integrity
  * purposes - I/O may not be started against all dirty pages.
+ */
+
+/**
+ * filemap_flush - 主要是一个非阻塞刷新操作
+ * @mapping: 目标地址空间
+ * 
+ * 这是一个主要的非阻塞刷新操作。不适用于数据完整性目的——可能不会对所有脏页面启动 I/O。
  */
 int filemap_flush(struct address_space *mapping)
 {
@@ -268,41 +311,63 @@ EXPORT_SYMBOL(filemap_flush);
  * Walk the list of under-writeback pages of the given address space
  * in the given range and wait for all of them.
  */
+/**
+ * filemap_fdatawait_range - 等待写回完成
+ * @mapping: 要等待的地址空间结构体
+ * @start_byte: 范围的开始字节偏移
+ * @end_byte: 范围的结束字节偏移（包含）
+ *
+ * 遍历给定地址空间在指定范围内正在写回的页面列表并等待所有这些页面。
+ */
+// 这个函数通过循环遍历给定范围内的所有页面，等待每个页面的写回操作完成，并检查是否有
+// 任何页面在写回过程中出现错误。如果有错误发生，函数将返回错误代码。这个函数是内核中
+// 处理文件数据同步的重要部分，确保数据的完整性。
 int filemap_fdatawait_range(struct address_space *mapping, loff_t start_byte,
 			    loff_t end_byte)
 {
+	// 计算起始和结束的页面索引
 	pgoff_t index = start_byte >> PAGE_CACHE_SHIFT;
 	pgoff_t end = end_byte >> PAGE_CACHE_SHIFT;
 	struct pagevec pvec;
 	int nr_pages;
 	int ret = 0;
 
+	// 如果结束字节小于开始字节，则直接返回，无需处理
 	if (end_byte < start_byte)
 		return 0;
 
+	// 初始化页面向量
 	pagevec_init(&pvec, 0);
+	// 循环通过页面向量查找和处理所有标记为正在写回的页面
 	while ((index <= end) &&
 			(nr_pages = pagevec_lookup_tag(&pvec, mapping, &index,
 			PAGECACHE_TAG_WRITEBACK,
 			min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1)) != 0) {
 		unsigned i;
 
+		// 遍历所有找到的页面
 		for (i = 0; i < nr_pages; i++) {
 			struct page *page = pvec.pages[i];
 
 			/* until radix tree lookup accepts end_index */
+			// 如果页面的索引超出了结束索引，则跳过
 			if (page->index > end)
 				continue;
 
+			// 等待页面的写回完成
 			wait_on_page_writeback(page);
+			// 如果页面有错误，则设置返回值为 -EIO
 			if (PageError(page))
 				ret = -EIO;
 		}
+		// 释放页面向量
 		pagevec_release(&pvec);
+		// 调度点检查
 		cond_resched();
 	}
 
 	/* Check for outstanding write errors */
+	// 检查是否有未处理的写错误
 	if (test_and_clear_bit(AS_ENOSPC, &mapping->flags))
 		ret = -ENOSPC;
 	if (test_and_clear_bit(AS_EIO, &mapping->flags))
@@ -319,22 +384,30 @@ EXPORT_SYMBOL(filemap_fdatawait_range);
  * Walk the list of under-writeback pages of the given address space
  * and wait for all of them.
  */
+// filemap_fdatawait - 等待所有正在写回的页面完成
+// @mapping: 要等待的地址空间结构体
 int filemap_fdatawait(struct address_space *mapping)
 {
+	// 读取文件大小
 	loff_t i_size = i_size_read(mapping->host);
 
+	// 如果文件大小为0，没有什么要等待的，直接返回成功
 	if (i_size == 0)
 		return 0;
 
+	// 等待从0到文件大小的所有页面
 	return filemap_fdatawait_range(mapping, 0, i_size - 1);
 }
 EXPORT_SYMBOL(filemap_fdatawait);
 
+// filemap_write_and_wait - 写入并等待所有页面
 int filemap_write_and_wait(struct address_space *mapping)
 {
 	int err = 0;
 
+	// 如果有页面需要处理
 	if (mapping->nrpages) {
+		// 写入所有脏页
 		err = filemap_fdatawrite(mapping);
 		/*
 		 * Even if the above returned error, the pages may be
@@ -342,8 +415,10 @@ int filemap_write_and_wait(struct address_space *mapping)
 		 * But the -EIO is special case, it may indicate the worst
 		 * thing (e.g. bug) happened, so we avoid waiting for it.
 		 */
-		if (err != -EIO) {
+		if (err != -EIO) {	// 如果没有遇到I/O错误
+			// 然后等待所有页面
 			int err2 = filemap_fdatawait(mapping);
+			// 如果之前没有错误，返回这个等待的结果
 			if (!err)
 				err = err2;
 		}
@@ -363,18 +438,36 @@ EXPORT_SYMBOL(filemap_write_and_wait);
  * Note that `lend' is inclusive (describes the last byte to be written) so
  * that this function can be used to write to the very end-of-file (end = -1).
  */
+/**
+ * filemap_write_and_wait_range - 写出并等待文件的一个区域
+ * @mapping: 负责页面的地址空间
+ * @lstart: 区域开始的字节偏移量
+ * @lend: 区域结束的字节偏移量（包括在内）
+ *
+ * 写出并等待文件偏移量lstart到lend之间的数据，包括边界。
+ *
+ * 注意，`lend`是包含在内的（描述要写的最后一个字节），
+ * 这样这个函数可以用来写文件的最末端（end = -1）。
+ */
+// filemap_write_and_wait_range - 写出并等待文件的一个范围
 int filemap_write_and_wait_range(struct address_space *mapping,
 				 loff_t lstart, loff_t lend)
 {
-	int err = 0;
+	int err = 0;	// 初始化错误码为0
 
+	// 如果有页面需要处理
 	if (mapping->nrpages) {
+		// 调用__filemap_fdatawrite_range函数，以同步方式写出指定范围的页面
 		err = __filemap_fdatawrite_range(mapping, lstart, lend,
 						 WB_SYNC_ALL);
 		/* See comment of filemap_write_and_wait() */
+		/* 参见 filemap_write_and_wait() 的注释 */
+		// 如果没有遇到I/O错误
 		if (err != -EIO) {
+			// 等待这个范围内的页面写入完成
 			int err2 = filemap_fdatawait_range(mapping,
 						lstart, lend);
+			// 如果之前没有错误，返回这个等待的结果
 			if (!err)
 				err = err2;
 		}
@@ -433,6 +526,8 @@ out:
 }
 EXPORT_SYMBOL(add_to_page_cache_locked);
 
+// 通过page_cache_alloc_cold函数分配一个新页面，然后调用add_to_page_cache_lru将其加入到页面调整缓存。
+// 用于将一个页面添加到页缓存和最近最少使用（LRU）列表中。
 int add_to_page_cache_lru(struct page *page, struct address_space *mapping,
 				pgoff_t offset, gfp_t gfp_mask)
 {
@@ -444,16 +539,26 @@ int add_to_page_cache_lru(struct page *page, struct address_space *mapping,
 	 * need to go on the active_anon lru below, and mem_cgroup_cache_charge
 	 * (called in add_to_page_cache) needs to know where they're going too.
 	 */
+	/*
+	 * Splice_read 和 readahead 在 shmem_readpage 有机会标记它们为 SwapBacked 之前
+	 * 就已经将 shmem/tmpfs 页面加入到页缓存中：它们需要被添加到下面的 active_anon lru 中，
+	 * 并且 mem_cgroup_cache_charge（在 add_to_page_cache 中调用）也需要知道它们的去向。
+	 */
 	if (mapping_cap_swap_backed(mapping))
+		// 如果映射支持交换后备，则设置页面的 SwapBacked 标志
 		SetPageSwapBacked(page);
 
+	// 尝试将页面添加到页缓存中
 	ret = add_to_page_cache(page, mapping, offset, gfp_mask);
-	if (ret == 0) {
+	if (ret == 0) {	// 如果添加成功
 		if (page_is_file_cache(page))
+			// 如果是文件缓存页面，将其添加到文件缓存的 LRU 列表中
 			lru_cache_add_file(page);
 		else
+			// 否则，将其添加到活跃匿名页面的 LRU 列表中
 			lru_cache_add_active_anon(page);
 	}
+	// 返回操作结果，0 表示成功，其他值表示错误代码
 	return ret;
 }
 EXPORT_SYMBOL_GPL(add_to_page_cache_lru);
@@ -1853,22 +1958,33 @@ EXPORT_SYMBOL(file_remove_suid);
 static size_t __iovec_copy_from_user_inatomic(char *vaddr,
 			const struct iovec *iov, size_t base, size_t bytes)
 {
+	// 已复制和剩余未复制的字节数
 	size_t copied = 0, left = 0;
 
-	while (bytes) {
+	while (bytes) {	// 当还有字节需要复制时
+		// 用户空间的数据源地址
 		char __user *buf = iov->iov_base + base;
+		// 计算这次需要复制的字节数
 		int copy = min(bytes, iov->iov_len - base);
 
+		// 基础偏移设置为0，因为在第一次循环后应从iov的开始复制
 		base = 0;
+		// 从用户空间复制数据到内核空间
 		left = __copy_from_user_inatomic(vaddr, buf, copy);
+		// 更新已复制的字节数
 		copied += copy;
+		// 减少剩余需要复制的字节数
 		bytes -= copy;
+		// 移动目标内存地址
 		vaddr += copy;
+		// 移动到下一个iovec元素
 		iov++;
 
+		// 如果剩余未复制字节数不为零，即复制过程中出错
 		if (unlikely(left))
 			break;
 	}
+	// 返回成功复制的总字节数
 	return copied - left;
 }
 
@@ -1877,26 +1993,35 @@ static size_t __iovec_copy_from_user_inatomic(char *vaddr,
  * were successfully copied.  If a fault is encountered then return the number of
  * bytes which were copied.
  */
+/*
+ * 复制尽可能多的数据到页面，并返回成功复制的字节数。如果遇到错误，则返回已复制的字节数。
+ */
 size_t iov_iter_copy_from_user_atomic(struct page *page,
 		struct iov_iter *i, unsigned long offset, size_t bytes)
 {
-	char *kaddr;
-	size_t copied;
+	char *kaddr;		// 内核空间的地址
+	size_t copied;	// 已复制的字节数
 
-	BUG_ON(!in_atomic());
+	BUG_ON(!in_atomic());	// 确认当前在原子上下文中
+	// 将页面映射到内核地址空间
 	kaddr = kmap_atomic(page, KM_USER0);
+	// 如果只有一个段
 	if (likely(i->nr_segs == 1)) {
 		int left;
+		// 用户空间的数据源地址
 		char __user *buf = i->iov->iov_base + i->iov_offset;
+		// 从用户空间复制数据到内核空间
 		left = __copy_from_user_inatomic(kaddr + offset, buf, bytes);
+		// 计算成功复制的字节数
 		copied = bytes - left;
-	} else {
+	} else {	// 如果有多个段
+		// 使用专门的函数处理多段复制
 		copied = __iovec_copy_from_user_inatomic(kaddr + offset,
 						i->iov, i->iov_offset, bytes);
 	}
-	kunmap_atomic(kaddr, KM_USER0);
+	kunmap_atomic(kaddr, KM_USER0);	// 取消映射
 
-	return copied;
+	return copied;	// 返回成功复制的字节数
 }
 EXPORT_SYMBOL(iov_iter_copy_from_user_atomic);
 
@@ -2107,12 +2232,15 @@ generic_file_direct_write(struct kiocb *iocb, const struct iovec *iov,
 	size_t		write_len;
 	pgoff_t		end;
 
+	// 如果请求写入的长度小于原始长度，调整iov长度。
 	if (count != ocount)
 		*nr_segs = iov_shorten((struct iovec *)iov, *nr_segs, count);
 
+	// 计算实际写入的长度。
 	write_len = iov_length(iov, *nr_segs);
 	end = (pos + write_len - 1) >> PAGE_CACHE_SHIFT;
 
+	// 执行写入，等待文件映射区间中所有已有的写入完成。
 	written = filemap_write_and_wait_range(mapping, pos, pos + write_len - 1);
 	if (written)
 		goto out;
@@ -2123,6 +2251,7 @@ generic_file_direct_write(struct kiocb *iocb, const struct iovec *iov,
 	 * about to write.  We do this *before* the write so that we can return
 	 * without clobbering -EIOCBQUEUED from ->direct_IO().
 	 */
+	// 写入前，使缓存中的干净页无效，确保读取到的是新数据。
 	if (mapping->nrpages) {
 		written = invalidate_inode_pages2_range(mapping,
 					pos >> PAGE_CACHE_SHIFT, end);
@@ -2130,6 +2259,7 @@ generic_file_direct_write(struct kiocb *iocb, const struct iovec *iov,
 		 * If a page can not be invalidated, return 0 to fall back
 		 * to buffered write.
 		 */
+		// 如果页无法无效化，返回0退回到缓冲写。
 		if (written) {
 			if (written == -EBUSY)
 				return 0;
@@ -2137,6 +2267,7 @@ generic_file_direct_write(struct kiocb *iocb, const struct iovec *iov,
 		}
 	}
 
+	// 执行直接I/O操作。
 	written = mapping->a_ops->direct_IO(WRITE, iocb, iov, pos, *nr_segs);
 
 	/*
@@ -2147,11 +2278,13 @@ generic_file_direct_write(struct kiocb *iocb, const struct iovec *iov,
 	 * so we don't support it 100%.  If this invalidation
 	 * fails, tough, the write still worked...
 	 */
+	// 写入后，再次尝试使缓存中的干净页无效。
 	if (mapping->nrpages) {
 		invalidate_inode_pages2_range(mapping,
 					      pos >> PAGE_CACHE_SHIFT, end);
 	}
 
+	// 如果写入成功，更新文件大小。
 	if (written > 0) {
 		loff_t end = pos + written;
 		if (end > i_size_read(inode) && !S_ISBLK(inode->i_mode)) {
@@ -2197,31 +2330,44 @@ repeat:
 }
 EXPORT_SYMBOL(grab_cache_page_write_begin);
 
+// 执行文件写入操作。它处理了从用户空间到文件页缓存的数据拷贡，并且处理了相关的页缓存管理和脏页的平衡。
 static ssize_t generic_perform_write(struct file *file,
 				struct iov_iter *i, loff_t pos)
 {
+	// 获取文件的地址空间
 	struct address_space *mapping = file->f_mapping;
+	// 地址空间操作集
 	const struct address_space_operations *a_ops = mapping->a_ops;
-	long status = 0;
-	ssize_t written = 0;
-	unsigned int flags = 0;
+	long status = 0;	// 状态变量，用于记录操作的结果
+	ssize_t written = 0;	// 已写入的字节数
+	unsigned int flags = 0;	// 标志位
 
 	/*
 	 * Copies from kernel address space cannot fail (NFSD is a big user).
 	 */
+	// 如果当前上下文是内核数据段，则设置不可中断标志
 	if (segment_eq(get_fs(), KERNEL_DS))
 		flags |= AOP_FLAG_UNINTERRUPTIBLE;
 
 	do {
+		// 页面指针
 		struct page *page;
+		// 当前页在页缓存中的索引
 		pgoff_t index;		/* Pagecache index for current page */
+		// 页内偏移
 		unsigned long offset;	/* Offset into pagecache page */
+		// 要写入的字节数
 		unsigned long bytes;	/* Bytes to write to page */
+		// 实际从用户空间拷贡的字节数
 		size_t copied;		/* Bytes copied from user */
+		// 文件系统相关数据，由write_begin返回
 		void *fsdata;
 
+		// 计算页内偏移
 		offset = (pos & (PAGE_CACHE_SIZE - 1));
+		// 计算页索引
 		index = pos >> PAGE_CACHE_SHIFT;
+		// 计算此次操作的最大字节数
 		bytes = min_t(unsigned long, PAGE_CACHE_SIZE - offset,
 						iov_iter_count(i));
 
@@ -2237,33 +2383,40 @@ again:
 		 * to check that the address is actually valid, when atomic
 		 * usercopies are used, below.
 		 */
+		// 检查是否有足够的用户空间可以读取
 		if (unlikely(iov_iter_fault_in_readable(i, bytes))) {
-			status = -EFAULT;
+			status = -EFAULT;	// 地址错误
 			break;
 		}
 
+		// 开始写操作之前的准备，可能包括锁定页等
 		status = a_ops->write_begin(file, mapping, pos, bytes, flags,
 						&page, &fsdata);
 		if (unlikely(status))
 			break;
 
+		// 如果地址空间被映射为可写，则刷新页面缓存
 		if (mapping_writably_mapped(mapping))
 			flush_dcache_page(page);
 
-		pagefault_disable();
+		pagefault_disable();	// 禁用页错误
+		// 从用户空间拷贡数据
 		copied = iov_iter_copy_from_user_atomic(page, i, offset, bytes);
-		pagefault_enable();
-		flush_dcache_page(page);
+		pagefault_enable();	// 启用页错误
+		flush_dcache_page(page);	// 刷新页面缓存
 
-		mark_page_accessed(page);
+		mark_page_accessed(page);	// 标记页面为已访问
+		// 完成写操作，解锁页等
 		status = a_ops->write_end(file, mapping, pos, bytes, copied,
 						page, fsdata);
 		if (unlikely(status < 0))
 			break;
 		copied = status;
 
+		// 条件调度，允许其他进程运行
 		cond_resched();
 
+		// 推进迭代器
 		iov_iter_advance(i, copied);
 		if (unlikely(copied == 0)) {
 			/*
@@ -2276,15 +2429,19 @@ again:
 			 */
 			bytes = min_t(unsigned long, PAGE_CACHE_SIZE - offset,
 						iov_iter_single_seg_count(i));
+			// 如果未拷贡任何数据，尝试更小的单片段写入
 			goto again;
 		}
-		pos += copied;
-		written += copied;
+		pos += copied;	 // 更新位置
+		written += copied;	// 更新写入字节数
 
+		// 平衡脏页，按需写入
 		balance_dirty_pages_ratelimited(mapping);
 
+		// 如果还有数据未写入，则继续循环
 	} while (iov_iter_count(i));
 
+	// 返回写入的字节数或错误状态
 	return written ? written : status;
 }
 
@@ -2293,18 +2450,25 @@ generic_file_buffered_write(struct kiocb *iocb, const struct iovec *iov,
 		unsigned long nr_segs, loff_t pos, loff_t *ppos,
 		size_t count, ssize_t written)
 {
+	// 从IO控制块获取文件指针
 	struct file *file = iocb->ki_filp;
+	// 用来存储写操作的返回状态
 	ssize_t status;
+	// iov迭代器，用于处理多段IO
 	struct iov_iter i;
 
+	// 初始化iov迭代器，设置其起始位置和长度
 	iov_iter_init(&i, iov, nr_segs, count, written);
+	// 执行缓冲写操作
 	status = generic_perform_write(file, &i, pos);
 
+	// 检查写操作的状态，如果成功，则更新已写入的总字节数和文件位置指针
 	if (likely(status >= 0)) {
-		written += status;
-		*ppos = pos + status;
+		written += status;	// 累加已写入字节数
+		*ppos = pos + status;	// 更新文件位置指针
   	}
 	
+	// 返回已写入的字节数或错误状态
 	return written ? written : status;
 }
 EXPORT_SYMBOL(generic_file_buffered_write);
@@ -2328,18 +2492,35 @@ EXPORT_SYMBOL(generic_file_buffered_write);
  * A caller has to handle it. This is mainly due to the fact that we want to
  * avoid syncing under i_mutex.
  */
+/**
+ * __generic_file_aio_write - 实际将数据写入文件的函数
+ * @iocb: 描述IO状态的结构体（包含文件、偏移等信息）
+ * @iov: 包含要写入数据的向量
+ * @nr_segs: 向量中段的数量
+ * @ppos: 要写入的位置
+ *
+ * 该函数完成将数据实际写入文件所需的所有工作。它进行所有基本检查，移除文件的SUID，更新修改时间，
+ * 并根据是否执行直接IO或标准缓冲写入调用相应的子程序。
+ *
+ * 除非我们操作的是块设备或类似不需要锁定的对象，否则期望在调用此函数之前已获取i_mutex。
+ *
+ * 该函数不负责同步数据以处理O_SYNC写入。调用者需要处理它。这主要是因为我们想避免在i_mutex下同步。
+ */
 ssize_t __generic_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 				 unsigned long nr_segs, loff_t *ppos)
 {
 	struct file *file = iocb->ki_filp;
 	struct address_space * mapping = file->f_mapping;
+	/* 原始计数 */
 	size_t ocount;		/* original count */
+	/* 文件限制检查后的计数 */
 	size_t count;		/* after file limit checks */
 	struct inode 	*inode = mapping->host;
 	loff_t		pos;
 	ssize_t		written;
 	ssize_t		err;
 
+	// 对iov进行基本的安全性检查，确认读取操作是安全的
 	ocount = 0;
 	err = generic_segment_checks(iov, &nr_segs, &ocount, VERIFY_READ);
 	if (err)
@@ -2348,30 +2529,38 @@ ssize_t __generic_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	count = ocount;
 	pos = *ppos;
 
+	// 检查文件系统是否冻结
 	vfs_check_frozen(inode->i_sb, SB_FREEZE_WRITE);
 
 	/* We can write back this queue in page reclaim */
+	// 关联当前任务的后备设备信息
 	current->backing_dev_info = mapping->backing_dev_info;
 	written = 0;
 
+	// 检查写入操作是否合法（文件大小、权限等）
 	err = generic_write_checks(file, &pos, &count, S_ISBLK(inode->i_mode));
 	if (err)
 		goto out;
 
+	// 如果没有什么要写的，直接退出
 	if (count == 0)
 		goto out;
 
+	// 移除文件的set-user-ID和set-group-ID位
 	err = file_remove_suid(file);
 	if (err)
 		goto out;
 
+	// 更新文件的访问时间和修改时间
 	file_update_time(file);
 
 	/* coalesce the iovecs and go direct-to-BIO for O_DIRECT */
+	// 如果文件以O_DIRECT标志打开，使用直接I/O
 	if (unlikely(file->f_flags & O_DIRECT)) {
 		loff_t endbyte;
 		ssize_t written_buffered;
 
+		// 执行直接写入
 		written = generic_file_direct_write(iocb, iov, &nr_segs, pos,
 							ppos, count, ocount);
 		if (written < 0 || written == count)
@@ -2380,6 +2569,7 @@ ssize_t __generic_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 		 * direct-io write to a hole: fall through to buffered I/O
 		 * for completing the rest of the request.
 		 */
+		// 如果直接I/O只完成了部分写入，则使用缓冲写入完成剩余部分
 		pos += written;
 		count -= written;
 		written_buffered = generic_file_buffered_write(iocb, iov,
@@ -2392,6 +2582,7 @@ ssize_t __generic_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 		 * that this differs from normal direct-io semantics, which
 		 * will return -EFOO even if some bytes were written.
 		 */
+		// 如果缓冲写入发生错误，则处理错误
 		if (written_buffered < 0) {
 			err = written_buffered;
 			goto out;
@@ -2402,6 +2593,7 @@ ssize_t __generic_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 		 * disk and invalidated to preserve the expected O_DIRECT
 		 * semantics.
 		 */
+		// 确保缓存中的页被写入磁盘并且失效
 		endbyte = pos + written_buffered - written - 1;
 		err = filemap_write_and_wait_range(file->f_mapping, pos, endbyte);
 		if (err == 0) {
@@ -2414,12 +2606,15 @@ ssize_t __generic_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 			 * We don't know how much we wrote, so just return
 			 * the number of bytes which were direct-written
 			 */
+			// 只返回直接写入的字节数
 		}
 	} else {
+		// 执行缓冲写入
 		written = generic_file_buffered_write(iocb, iov, nr_segs,
 				pos, ppos, count, written);
 	}
 out:
+	// 清除任务的后备设备信息
 	current->backing_dev_info = NULL;
 	return written ? written : err;
 }
@@ -2436,27 +2631,46 @@ EXPORT_SYMBOL(__generic_file_aio_write);
  * filesystems. It takes care of syncing the file in case of O_SYNC file
  * and acquires i_mutex as needed.
  */
+/**
+ * generic_file_aio_write - 向文件写入数据
+ * @iocb:	IO 状态结构
+ * @iov:	包含待写数据的向量
+ * @nr_segs:	向量中的段数
+ * @pos:	写入文件的位置
+ *
+ * 这是 __generic_file_aio_write() 的一个包装函数，大多数文件系统都应使用它。
+ * 它处理了 O_SYNC 文件的同步写入，并在需要时获取 i_mutex。
+ */
 ssize_t generic_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 		unsigned long nr_segs, loff_t pos)
 {
+	// 从 IO 控制块获取文件指针
 	struct file *file = iocb->ki_filp;
+	// 从文件映射中获取 inode
 	struct inode *inode = file->f_mapping->host;
 	ssize_t ret;
 
+	// 确保传入的位置与 IO 控制块中的位置一致
 	BUG_ON(iocb->ki_pos != pos);
 
+	// 锁定 inode 互斥锁以保护文件写入操作
 	mutex_lock(&inode->i_mutex);
+	// 执行实际的异步写操作
 	ret = __generic_file_aio_write(iocb, iov, nr_segs, &iocb->ki_pos);
+	// 解锁 inode 互斥锁
 	mutex_unlock(&inode->i_mutex);
 
+	// 如果写入成功或操作已排队
 	if (ret > 0 || ret == -EIOCBQUEUED) {
 		ssize_t err;
 
+		// 执行写入后的同步操作
 		err = generic_write_sync(file, pos, ret);
+		// 如果同步操作失败但写入成功，返回错误
 		if (err < 0 && ret > 0)
 			ret = err;
 	}
-	return ret;
+	return ret;	// 返回写入结果
 }
 EXPORT_SYMBOL(generic_file_aio_write);
 

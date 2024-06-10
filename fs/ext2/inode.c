@@ -737,6 +737,18 @@ int ext2_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 				    ext2_get_block);
 }
 
+/*
+ * ext2_writepage - 将一个页写入磁盘
+ * @page: 需要写入的页
+ * @wbc: 写回控制结构，包含写回操作的参数
+ *
+ * 这个函数是ext2文件系统用于写回单个页到磁盘的函数。
+ * 它使用block_write_full_page函数，这是一个通用的辅助函数，用于处理
+ * 将页写入到块设备的详细操作。ext2_get_block是传递给block_write_full_page的函数，
+ * 用于将文件系统的逻辑块号映射到物理块号。
+ *
+ * 返回值: 返回block_write_full_page函数的返回结果，通常是0表示成功。
+ */
 static int ext2_writepage(struct page *page, struct writeback_control *wbc)
 {
 	return block_write_full_page(page, ext2_get_block, wbc);
@@ -754,20 +766,31 @@ ext2_readpages(struct file *file, struct address_space *mapping,
 	return mpage_readpages(mapping, pages, nr_pages, ext2_get_block);
 }
 
+/*
+ * 用于启动对给定文件的写操作的预处理函数。此函数设置必要的数据结构
+ * 以开始写入指定的文件区域。
+ */
 int __ext2_write_begin(struct file *file, struct address_space *mapping,
 		loff_t pos, unsigned len, unsigned flags,
 		struct page **pagep, void **fsdata)
 {
+	// 调用block层的写入开始函数，使用ext2特有的块获取函数ext2_get_block
 	return block_write_begin(file, mapping, pos, len, flags, pagep, fsdata,
 							ext2_get_block);
 }
 
+/*
+ * 该函数是写入操作的入口点。它主要负责调用__ext2_write_begin
+ * 并初始化必要的参数。
+ */
 static int
 ext2_write_begin(struct file *file, struct address_space *mapping,
 		loff_t pos, unsigned len, unsigned flags,
 		struct page **pagep, void **fsdata)
 {
+	// 初始化page指针为NULL
 	*pagep = NULL;
+	// 调用实际执行写入初始化的函数
 	return __ext2_write_begin(file, mapping, pos, len, flags, pagep,fsdata);
 }
 
@@ -795,36 +818,45 @@ static sector_t ext2_bmap(struct address_space *mapping, sector_t block)
 {
 	return generic_block_bmap(mapping,block,ext2_get_block);
 }
-
+ 
+// 实现 ext2 文件系统的直接 I/O 操作
 static ssize_t
 ext2_direct_IO(int rw, struct kiocb *iocb, const struct iovec *iov,
 			loff_t offset, unsigned long nr_segs)
 {
+	// 从 IO 控制块中获取文件指针
 	struct file *file = iocb->ki_filp;
+	// 获取 inode 对象
 	struct inode *inode = file->f_mapping->host;
 
+	// 调用通用 block device 直接 I/O 函数，并使用 ext2_get_block 作为块映射函数
 	return blockdev_direct_IO(rw, iocb, inode, inode->i_sb->s_bdev, iov,
 				offset, nr_segs, ext2_get_block, NULL);
 }
 
+// 实现 ext2 文件系统的写入页操作，使用页写入框架
 static int
 ext2_writepages(struct address_space *mapping, struct writeback_control *wbc)
 {
+	// 使用 ext2 的块映射函数处理写入页
 	return mpage_writepages(mapping, wbc, ext2_get_block);
 }
 
+// 定义 ext2 文件系统对地址空间的操作方法
 const struct address_space_operations ext2_aops = {
-	.readpage		= ext2_readpage,
-	.readpages		= ext2_readpages,
-	.writepage		= ext2_writepage,
-	.sync_page		= block_sync_page,
-	.write_begin		= ext2_write_begin,
-	.write_end		= generic_write_end,
-	.bmap			= ext2_bmap,
-	.direct_IO		= ext2_direct_IO,
-	.writepages		= ext2_writepages,
-	.migratepage		= buffer_migrate_page,
+	.readpage		= ext2_readpage,	// 读取单个页
+	.readpages		= ext2_readpages,	// 读取多个页
+	.writepage		= ext2_writepage,	// 写入单个页
+	.sync_page		= block_sync_page,	// 同步页
+	.write_begin		= ext2_write_begin,	// 开始写操作
+	.write_end		= generic_write_end,	// 结束写操作
+	.bmap			= ext2_bmap,		// 文件系统块映射
+	.direct_IO		= ext2_direct_IO,	// 直接 I/O 操作
+	.writepages		= ext2_writepages,	// 写入多个页
+	.migratepage		= buffer_migrate_page,	// 迁移页
+	// 判断页是否部分有效
 	.is_partially_uptodate	= block_is_partially_uptodate,
+	// 移除页错误处理
 	.error_remove_page	= generic_error_remove_page,
 };
 

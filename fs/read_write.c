@@ -305,25 +305,31 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 
 EXPORT_SYMBOL(vfs_read);
 
+// 处理同步写操作，将用户空间的数据写入文件。
 ssize_t do_sync_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos)
 {
 	struct iovec iov = { .iov_base = (void __user *)buf, .iov_len = len };
-	struct kiocb kiocb;
+	struct kiocb kiocb;	// 内核异步I/O控制块
 	ssize_t ret;
 
+	// 初始化同步I/O控制块
 	init_sync_kiocb(&kiocb, filp);
-	kiocb.ki_pos = *ppos;
-	kiocb.ki_left = len;
-	kiocb.ki_nbytes = len;
+	kiocb.ki_pos = *ppos;	// 设置文件位置
+	kiocb.ki_left = len;	// 设置剩余字节数
+	kiocb.ki_nbytes = len;	// 设置总字节数
 
 	for (;;) {
 		ret = filp->f_op->aio_write(&kiocb, &iov, 1, kiocb.ki_pos);
+		// 如果不需要重试则退出循环
 		if (ret != -EIOCBRETRY)
 			break;
+		// 等待I/O操作可再次执行
 		wait_on_retry_sync_kiocb(&kiocb);
 	}
 
+	// 如果操作已排队，等待完成
 	if (-EIOCBQUEUED == ret)
+		// 更新文件位置
 		ret = wait_on_sync_kiocb(&kiocb);
 	*ppos = kiocb.ki_pos;
 	return ret;
@@ -335,24 +341,33 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 {
 	ssize_t ret;
 
+	// 检查文件是否具有写权限。
 	if (!(file->f_mode & FMODE_WRITE))
 		return -EBADF;
+	// 检查文件操作结构（file->f_op）是否存在以及相应的写方法是否有效。
 	if (!file->f_op || (!file->f_op->write && !file->f_op->aio_write))
 		return -EINVAL;
+	// 验证用户空间的地址有效性。
 	if (unlikely(!access_ok(VERIFY_READ, buf, count)))
 		return -EFAULT;
-
+	
+	// 验证和调整写入操作的范围。
 	ret = rw_verify_area(WRITE, file, pos, count);
 	if (ret >= 0) {
 		count = ret;
 		if (file->f_op->write)
+			// // 执行同步写
 			ret = file->f_op->write(file, buf, count, pos);
 		else
+			// 执行同步写
 			ret = do_sync_write(file, buf, count, pos);
 		if (ret > 0) {
+			// 通知文件系统发生了修改
 			fsnotify_modify(file->f_path.dentry);
+			// 增加写入字符计数
 			add_wchar(current, ret);
 		}
+		// 增加系统调用写计数
 		inc_syscw(current);
 	}
 

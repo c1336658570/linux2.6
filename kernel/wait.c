@@ -275,6 +275,18 @@ EXPORT_SYMBOL(__wake_up_bit);
  * may need to use a less regular barrier, such fs/inode.c's smp_mb(),
  * because spin_unlock() does not guarantee a memory barrier.
  */
+/**
+ * wake_up_bit - 唤醒位上等待的进程
+ * @word: 正在等待的word,一个内核虚拟地址
+ * @bit: word上正在等待的位
+ *
+ * 这里有一个标准的散列等待队列表用于普遍用途。这是哈希表访问器API的一部分,唤醒位上等待的进程。
+ * 例如,如果有进程等待一个位标志,在清除该位后就可以调用wake_up_bit()。
+ *
+ * 为了使这个函数正常工作,它在内部使用waitqueue_active(),因此在调用之前必须进行某种内存屏障。
+ * 通常这将是smp_mb__after_clear_bit(),但在某些情况下,当位标志在锁保护下非原子性地操作时,
+ * 可能需要使用更不规则的屏障,如fs/inode.c中的smp_mb(),因为spin_unlock()不能保证内存屏障。
+ */
 void wake_up_bit(void *word, int bit)
 {
 	__wake_up_bit(bit_waitqueue(word, bit), word, bit);
@@ -283,10 +295,15 @@ EXPORT_SYMBOL(wake_up_bit);
 
 wait_queue_head_t *bit_waitqueue(void *word, int bit)
 {
+	// 确定一个指向等待队列表的指针
+	// 根据系统位宽(32位或64位),决定偏移量
 	const int shift = BITS_PER_LONG == 32 ? 5 : 6;
+	// 获取word所在页面的zone
 	const struct zone *zone = page_zone(virt_to_page(word));
+	// 将word和bit组合成一个值,作为哈希表的索引
 	unsigned long val = (unsigned long)word << shift | bit;
 
+	// 返回等待队列表的地址
 	return &zone->wait_table[hash_long(val, zone->wait_table_bits)];
 }
 EXPORT_SYMBOL(bit_waitqueue);

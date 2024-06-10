@@ -677,23 +677,40 @@ out:
  * WB_SYNC_ALL then we were called for data integrity and we must wait for
  * existing IO to complete.
  */
+/**
+ * mpage_writepages - 遍历给定地址空间的脏页列表并写入所有这些页
+ * @mapping: 要写入的地址空间结构
+ * @wbc: 从 *@wbc->nr_to_write 减去已写入的页数
+ * @get_block: 文件系统的块映射函数。
+ *             如果此参数为 NULL，则使用 a_ops->writepage。否则，直接使用BIO方式。
+ *
+ * 这是一个库函数，它实现了 writepages() 地址空间操作。
+ *
+ * 如果某页已经在进行 I/O，generic_writepages() 会跳过它，即使它是脏的。
+ * 这对于清理内存的写回是理想的行为，但对于像 fsync() 这样的数据完整性系统调用来说是错误的。
+ * fsync() 和 msync() 需要保证在调用发生时所有脏数据都启动了新的 I/O。
+ * 如果 wbc->sync_mode 是 WB_SYNC_ALL，那么我们是为了数据完整性而被调用的，我们必须等待现有的IO完成。
+ */
 int
 mpage_writepages(struct address_space *mapping,
 		struct writeback_control *wbc, get_block_t get_block)
 {
 	int ret;
 
+	// 如果没有提供特定的块映射函数，使用通用的writepages方法
 	if (!get_block)
 		ret = generic_writepages(mapping, wbc);
 	else {
 		struct mpage_data mpd = {
-			.bio = NULL,
-			.last_block_in_bio = 0,
-			.get_block = get_block,
-			.use_writepage = 1,
+			.bio = NULL,	// 初始化bio结构为NULL
+			.last_block_in_bio = 0,	// 最后一个bio块的索引初始化为0
+			.get_block = get_block,	// 设置块映射函数
+			.use_writepage = 1,			// 设置使用writepage的标志
 		};
 
+		// 执行具体的页面写操作
 		ret = write_cache_pages(mapping, wbc, __mpage_writepage, &mpd);
+		// 如果bio不为空，则提交bio
 		if (mpd.bio)
 			mpage_bio_submit(WRITE, mpd.bio);
 	}
@@ -705,12 +722,14 @@ int mpage_writepage(struct page *page, get_block_t get_block,
 	struct writeback_control *wbc)
 {
 	struct mpage_data mpd = {
-		.bio = NULL,
-		.last_block_in_bio = 0,
-		.get_block = get_block,
-		.use_writepage = 0,
+		.bio = NULL,	// 初始化bio结构为NULL
+		.last_block_in_bio = 0,	// 最后一个bio块的索引初始化为0
+		.get_block = get_block,	// 设置块映射函数
+		.use_writepage = 0,			// 设置不使用writepage的标志
 	};
+	// 调用 __mpage_writepage 函数进行页的写操作
 	int ret = __mpage_writepage(page, wbc, &mpd);
+	// 如果bio不为空，则提交bio
 	if (mpd.bio)
 		mpage_bio_submit(WRITE, mpd.bio);
 	return ret;

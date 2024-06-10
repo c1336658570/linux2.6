@@ -630,10 +630,30 @@ struct address_space_operations {
  * pagecache_write_begin/pagecache_write_end must be used by general code
  * to write into the pagecache.
  */
+/*
+ * pagecache_write_begin/pagecache_write_end 必须由常规代码使用，
+ * 用于向页高速缓存写入数据。
+ */
+// 准备写入页高速缓存前的初始化工作
+// file: 操作的文件
+// mapping: 文件关联的地址空间，管理文件或块设备的内存映射
+// pos: 写入的起始位置
+// len: 写入的长度
+// flags: 操作标志
+// pagep: 输出参数，返回找到或创建的页面的指针
+// fsdata: 文件系统可能使用的私有数据指针
 int pagecache_write_begin(struct file *, struct address_space *mapping,
 				loff_t pos, unsigned len, unsigned flags,
 				struct page **pagep, void **fsdata);
 
+// 完成写入页高速缓存后的清理工作
+// file: 操作的文件
+// mapping: 文件关联的地址空间
+// pos: 写入的起始位置
+// len: 请求写入的长度
+// copied: 实际写入的长度
+// page: 涉及的页
+// fsdata: 文件系统可能使用的私有数据指针
 int pagecache_write_end(struct file *, struct address_space *mapping,
 				loff_t pos, unsigned len, unsigned copied,
 				struct page *page, void *fsdata);
@@ -674,7 +694,7 @@ struct address_space {
 	/* 方法操作集 */
 	const struct address_space_operations *a_ops;	/* methods */
 	/* 错误位/内存分配标志 */
-	// gfp_mask掩码与错误标识
+	// gfp_mask掩码（内存分配时使用）与错误标识
 	unsigned long		flags;		/* error bits/gfp mask */
 	/* 后备设备信息，如预读取等 */
 	// 预读信息
@@ -686,31 +706,49 @@ struct address_space {
 	// 相关的缓冲
 	struct address_space	*assoc_mapping;	/* ditto */
 } __attribute__((aligned(sizeof(long))));	/* 确保结构体按长整型大小对齐 */
+// 确保结构体按长整型大小对齐，这在大多数架构上已经是默认行为，但在一些架构如CRIS上需要显式声明。
 	/*
 	 * On most architectures that alignment is already the case; but
 	 * must be enforced here for CRIS, to let the least signficant bit
 	 * of struct page's "mapping" pointer be used for PAGE_MAPPING_ANON.
 	 */
 
+// 与底层的块设备操作相关
 struct block_device {
+	// 设备号，用作搜索键。
 	dev_t			bd_dev;  /* not a kdev_t - it's a search key */
+	// 将要被移除的inode指针。
 	struct inode *		bd_inode;	/* will die */
+	// 关联的超级块。
 	struct super_block *	bd_super;
+	// 打开设备的次数计数。
 	int			bd_openers;
+	// 用于打开/关闭设备的互斥锁。
 	struct mutex		bd_mutex;	/* open/close mutex */
+	// 与设备关联的inode列表。
 	struct list_head	bd_inodes;
+	// 设备的持有者。
 	void *			bd_holder;
+	// 设备持有者的数量。
 	int			bd_holders;
 #ifdef CONFIG_SYSFS
+	// 系统文件系统中的持有者列表。
 	struct list_head	bd_holder_list;
 #endif
+	// 包含此设备的父设备。
 	struct block_device *	bd_contains;
+	// 设备的块大小。
 	unsigned		bd_block_size;
+	// 设备的分区结构。
 	struct hd_struct *	bd_part;
 	/* number of times partitions within this device have been opened. */
+	// 设备内分区被打开的次数。
 	unsigned		bd_part_count;
+	// 设备是否被废弃标志。
 	int			bd_invalidated;
+	// 关联的通用磁盘结构。
 	struct gendisk *	bd_disk;
+	// 设备链表。
 	struct list_head	bd_list;
 	/*
 	 * Private data.  You must have bd_claim'ed the block_device
@@ -718,11 +756,14 @@ struct block_device {
 	 * the same device multiple times, the owner must take special
 	 * care to not mess up bd_private for that case.
 	 */
+	// 私有数据，仅在持有设备时可用。
 	unsigned long		bd_private;
 
 	/* The counter of freeze processes */
+	// 冻结进程的计数器。
 	int			bd_fsfreeze_count;
 	/* Mutex for freeze */
+	// 冻结操作的互斥锁。
 	struct mutex		bd_fsfreeze_mutex;
 };
 
@@ -2368,6 +2409,7 @@ extern void file_move(struct file *f, struct list_head *list);
 extern void file_kill(struct file *f);
 #ifdef CONFIG_BLOCK
 struct bio;
+// 定义了submit_bio函数，其目的是将一个bio结构体提交到块设备层进行I/O操作。
 extern void submit_bio(int, struct bio *);
 extern int bdev_read_only(struct block_device *);
 #endif
@@ -2433,6 +2475,7 @@ static inline int xip_truncate_page(struct address_space *mapping, loff_t from)
 #endif
 
 #ifdef CONFIG_BLOCK
+// 定义了直接IO操作的函数原型
 ssize_t __blockdev_direct_IO(int rw, struct kiocb *iocb, struct inode *inode,
 	struct block_device *bdev, const struct iovec *iov, loff_t offset,
 	unsigned long nr_segs, get_block_t get_block, dio_iodone_t end_io,
@@ -2440,12 +2483,15 @@ ssize_t __blockdev_direct_IO(int rw, struct kiocb *iocb, struct inode *inode,
 
 enum {
 	/* need locking between buffered and direct access */
+	/* 需要在缓冲访问和直接访问之间进行锁定 */
 	DIO_LOCKING	= 0x01,
 
 	/* filesystem does not support filling holes */
+	/* 文件系统不支持填充空洞 */
 	DIO_SKIP_HOLES	= 0x02,
 };
 
+// 提供直接IO访问的标准版本，使用锁定和跳过空洞的处理
 static inline ssize_t blockdev_direct_IO(int rw, struct kiocb *iocb,
 	struct inode *inode, struct block_device *bdev, const struct iovec *iov,
 	loff_t offset, unsigned long nr_segs, get_block_t get_block,
@@ -2456,6 +2502,7 @@ static inline ssize_t blockdev_direct_IO(int rw, struct kiocb *iocb,
 				    DIO_LOCKING | DIO_SKIP_HOLES);
 }
 
+// 提供直接IO访问的版本，不使用锁定机制
 static inline ssize_t blockdev_direct_IO_no_locking(int rw, struct kiocb *iocb,
 	struct inode *inode, struct block_device *bdev, const struct iovec *iov,
 	loff_t offset, unsigned long nr_segs, get_block_t get_block,

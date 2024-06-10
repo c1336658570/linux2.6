@@ -1401,16 +1401,40 @@ static inline int bio_check_eod(struct bio *bio, unsigned int nr_sectors)
  * bi_sector for remaps as it sees fit.  So the values of these fields
  * should NOT be depended on after the call to generic_make_request.
  */
+/**
+ * generic_make_request - 将一个缓冲区提交给其设备驱动进行I/O处理
+ * @bio: 描述内存和设备上位置的bio结构。
+ *
+ * generic_make_request() 用于发起块设备的I/O请求。它传递一个&struct bio，描述了需要执行的I/O。
+ *
+ * generic_make_request() 不返回任何状态。请求的成功/失败状态以及完成的通知
+ * 将通过bio->bi_end_io函数异步传递，该函数将在其他地方描述（将来某一天）。
+ *
+ * 调用generic_make_request的代码必须确保bi_io_vec设置正确，描述内存缓冲区，
+ * 并且bi_dev和bi_sector设置为描述设备地址，bi_end_io和可选的bi_private
+ * 设置为描述完成通知应如何被标记。
+ *
+ * generic_make_request及其调用的驱动程序可能会使用bi_next，如果这个bio与
+ * 其他某个bio合并，并且可能会根据需要更改bi_dev和bi_sector来进行重映射。
+ * 因此，在调用generic_make_request后不应依赖这些字段的值。
+ */
+// 用于将bio（块I/O操作）提交给下层的块设备驱动进行处理。
+// generic_make_request不返回状态，而是通过bio->bi_end_io函数异步地提供成功/失败状态和完成通知。
 static inline void __generic_make_request(struct bio *bio)
 {
-	struct request_queue *q;
-	sector_t old_sector;
+	struct request_queue *q;	// 请求队列指针
+	sector_t old_sector;			// 旧扇区编号
+	// 需处理的扇区数
 	int ret, nr_sectors = bio_sectors(bio);
+	// 旧设备号
 	dev_t old_dev;
+	// 默认错误码设置为输入/输出错误
 	int err = -EIO;
 
+	// 可能会睡眠
 	might_sleep();
 
+	// 检查请求的结束是否有效，检查是否超出了设备范围
 	if (bio_check_eod(bio, nr_sectors))
 		goto end_io;
 
@@ -1422,11 +1446,19 @@ static inline void __generic_make_request(struct bio *bio)
 	 * NOTE: we don't repeat the blk_size check for each new device.
 	 * Stacking drivers are expected to know what they are doing.
 	 */
+	/*
+	 * 解析映射直到完成。驱动程序仍然可以自由地实现/解析它们自己的堆栈，
+	 * 通过显式返回0。
+	 *
+	 * 注意：我们不会对每个新设备重复块大小检查。
+	 * 堆栈驱动程序应该知道他们在做什么。
+ */
 	old_sector = -1;
 	old_dev = 0;
 	do {
-		char b[BDEVNAME_SIZE];
+		char b[BDEVNAME_SIZE];	// 设备名缓冲区
 
+		// 获取设备的请求队列
 		q = bdev_get_queue(bio->bi_bdev);
 		if (unlikely(!q)) {
 			printk(KERN_ERR
@@ -1437,6 +1469,7 @@ static inline void __generic_make_request(struct bio *bio)
 			goto end_io;
 		}
 
+		// 检查是否请求超过了最大扇区数
 		if (unlikely(!bio_rw_flagged(bio, BIO_RW_DISCARD) &&
 			     nr_sectors > queue_max_hw_sectors(q))) {
 			printk(KERN_ERR "bio too big device %s (%u > %u)\n",
@@ -1446,9 +1479,11 @@ static inline void __generic_make_request(struct bio *bio)
 			goto end_io;
 		}
 
+		// 检查队列是否已标记为死亡
 		if (unlikely(test_bit(QUEUE_FLAG_DEAD, &q->queue_flags)))
 			goto end_io;
 
+		// 检查是否应该失败这个请求
 		if (should_fail_request(bio))
 			goto end_io;
 
@@ -1456,35 +1491,45 @@ static inline void __generic_make_request(struct bio *bio)
 		 * If this device has partitions, remap block n
 		 * of partition p to block n+start(p) of the disk.
 		 */
+		/*
+ 		 * 如果此设备有分区，重新映射分区p的块n到磁盘的块n+start(p)。
+ 		 */
+		// 处理设备分区映射
 		blk_partition_remap(bio);
 
+		// 如果启用了完整性校验，进行数据完整性预处理
 		if (bio_integrity_enabled(bio) && bio_integrity_prep(bio))
 			goto end_io;
 
+		// 记录重新映射信息
 		if (old_sector != -1)
 			trace_block_remap(q, bio, old_dev, old_sector);
 
 		old_sector = bio->bi_sector;
 		old_dev = bio->bi_bdev->bd_dev;
 
+		// 再次检查请求的结束是否有效
 		if (bio_check_eod(bio, nr_sectors))
 			goto end_io;
 
+		// 处理废弃标记的请求
 		if (bio_rw_flagged(bio, BIO_RW_DISCARD) &&
 		    !blk_queue_discard(q)) {
 			err = -EOPNOTSUPP;
 			goto end_io;
 		}
 
+		// 将bio放入队列
 		trace_block_bio_queue(q, bio);
 
+		// 调用队列的直接创建请求的函数
 		ret = q->make_request_fn(q, bio);
 	} while (ret);
 
-	return;
+	return;	// 返回，处理结束
 
 end_io:
-	bio_endio(bio, err);
+	bio_endio(bio, err);	// 处理I/O结束，设置错误码
 }
 
 /*
@@ -1502,6 +1547,9 @@ void generic_make_request(struct bio *bio)
 {
 	struct bio_list bio_list_on_stack;
 
+	/* 当前任务中make_request已激活 */
+	// 如果当前线程的bio_list不为空，说明generic_make_request正在处理另一个请求。
+	// 在这种情况下，将新的bio添加到当前线程的bio_list中，并返回。
 	if (current->bio_list) {
 		/* make_request is active */
 		bio_list_add(current->bio_list, bio);
@@ -1525,13 +1573,19 @@ void generic_make_request(struct bio *bio)
 	 * __generic_make_request (which is important as it is large and
 	 * inlined) and to keep the structure simple.
 	 */
+	// 如果bio_list为空，说明当前没有活跃的make_request，
+	// 则初始化一个本地的bio_list，并将其设置为当前线程的bio_list。
 	BUG_ON(bio->bi_next);
 	bio_list_init(&bio_list_on_stack);
 	current->bio_list = &bio_list_on_stack;
+	// 使用do...while循环来处理bio列表。每次循环调用__generic_make_request函数处理一个bio，
+	// 然后从bio_list中取出下一个bio进行处理，直到列表为空。
 	do {
 		__generic_make_request(bio);
 		bio = bio_list_pop(current->bio_list);
 	} while (bio);
+	/* 停用make_request标志 */
+	// 将current->bio_list设置为NULL，标志着make_request处理结束。
 	current->bio_list = NULL; /* deactivate */
 }
 EXPORT_SYMBOL(generic_make_request);
@@ -1546,26 +1600,37 @@ EXPORT_SYMBOL(generic_make_request);
  * interfaces; @bio must be presetup and ready for I/O.
  *
  */
+// 定义了submit_bio函数，其目的是将一个bio结构体提交到块设备层进行I/O操作。
 void submit_bio(int rw, struct bio *bio)
 {
+	// 计算bio中扇区的数量
 	int count = bio_sectors(bio);
 
-	bio->bi_rw |= rw;
+	bio->bi_rw |= rw;	// 将读/写标志位添加到bio的操作类型中
 
 	/*
 	 * If it's a regular read/write or a barrier with data attached,
 	 * go through the normal accounting stuff before submission.
 	 */
-	if (bio_has_data(bio)) {
-		if (rw & WRITE) {
+	/*
+     * 如果是常规的读/写操作或带数据的屏障操作，提交之前进行常规的资源统计。
+     */
+	if (bio_has_data(bio)) {	// 检查bio是否包含数据
+		if (rw & WRITE) {	// 如果是写操作
+			// 统计页面输出事件
 			count_vm_events(PGPGOUT, count);
-		} else {
+		} else {	// 如果是读操作
+			// 账户任务I/O读取量
 			task_io_account_read(bio->bi_size);
+			// 统计页面输入事件
 			count_vm_events(PGPGIN, count);
 		}
 
+		// 如果启用了块设备跟踪
 		if (unlikely(block_dump)) {
+			// 设备名缓冲区
 			char b[BDEVNAME_SIZE];
+			// 打印调试信息，包括进程名、进程ID、操作类型、扇区号和设备名
 			printk(KERN_DEBUG "%s(%d): %s block %Lu on %s\n",
 			current->comm, task_pid_nr(current),
 				(rw & WRITE) ? "WRITE" : "READ",
@@ -1574,6 +1639,7 @@ void submit_bio(int rw, struct bio *bio)
 		}
 	}
 
+	// 调用通用请求函数将bio提交给低级别驱动处理
 	generic_make_request(bio);
 }
 EXPORT_SYMBOL(submit_bio);

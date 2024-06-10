@@ -884,6 +884,12 @@ extern void blk_execute_rq_nowait(struct request_queue *, struct gendisk *,
 				  struct request *, int, rq_end_io_fn *);
 extern void blk_unplug(struct request_queue *q);
 
+/**
+ * bdev_get_queue - 获取与块设备关联的请求队列
+ * @bdev: 指向块设备结构的指针
+ *
+ * 此函数返回与指定块设备关联的请求队列的指针。
+ */
 static inline struct request_queue *bdev_get_queue(struct block_device *bdev)
 {
 	return bdev->bd_disk->queue;

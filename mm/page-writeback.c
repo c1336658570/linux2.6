@@ -480,38 +480,57 @@ get_dirty_limits(unsigned long *pbackground, unsigned long *pdirty,
  * If we're over `background_thresh' then the writeback threads are woken to
  * perform some writeout.
  */
+/*
+ * balance_dirty_pages() 必须被产生脏数据的进程调用。它会检查机器中的脏页数量，并且如果系统超过 `vm_dirty_ratio`，
+ * 将强制调用者执行写回。如果我们超过了 `background_thresh`，则唤醒写回线程执行一些写回操作。
+ */
 static void balance_dirty_pages(struct address_space *mapping,
 				unsigned long write_chunk)
 {
+	// 可回收的脏页数
 	long nr_reclaimable, bdi_nr_reclaimable;
+	// 正在写回的页数
 	long nr_writeback, bdi_nr_writeback;
+	// 背景阈值
 	unsigned long background_thresh;
+	// 脏页阈值
 	unsigned long dirty_thresh;
+	// bdi特定的阈值
 	unsigned long bdi_thresh;
+	// 已写回的页数
 	unsigned long pages_written = 0;
+	// 延迟等待时间
 	unsigned long pause = 1;
 
 	struct backing_dev_info *bdi = mapping->backing_dev_info;
 
 	for (;;) {
 		struct writeback_control wbc = {
-			.bdi		= bdi,
+			.bdi		= bdi,	// 指定bdi
+			// 同步模式，不强制同步
 			.sync_mode	= WB_SYNC_NONE,
-			.older_than_this = NULL,
-			.nr_to_write	= write_chunk,
-			.range_cyclic	= 1,
+			.older_than_this = NULL,	// 不考虑页面年龄
+			.nr_to_write	= write_chunk,	// 此次计判定写回的页数
+			.range_cyclic	= 1,	// 循环范围标记
 		};
 
+		// 获取脏页和背景写回的阈值。获取不同阈值，包括背景阈值、脏阈值和bdi阈值
 		get_dirty_limits(&background_thresh, &dirty_thresh,
 				&bdi_thresh, bdi);
-
+		
+		// 计算可回收和写回的页数
+		// 计算全局可回收脏页数
 		nr_reclaimable = global_page_state(NR_FILE_DIRTY) +
 					global_page_state(NR_UNSTABLE_NFS);
+		// 正在写回的页数
 		nr_writeback = global_page_state(NR_WRITEBACK);
 
+		// bdi的可回收页数
 		bdi_nr_reclaimable = bdi_stat(bdi, BDI_RECLAIMABLE);
+		// bdi的写回页数
 		bdi_nr_writeback = bdi_stat(bdi, BDI_WRITEBACK);
 
+		// 如果bdi的可回收和写回页数低于bdi阈值，则退出循环
 		if (bdi_nr_reclaimable + bdi_nr_writeback <= bdi_thresh)
 			break;
 
@@ -520,12 +539,13 @@ static void balance_dirty_pages(struct address_space *mapping,
 		 * catch-up. This avoids (excessively) small writeouts
 		 * when the bdi limits are ramping up.
 		 */
+		// 如果总的脏页数小于背景和脏阈值的平均值，则退出循环
 		if (nr_reclaimable + nr_writeback <
 				(background_thresh + dirty_thresh) / 2)
 			break;
 
 		if (!bdi->dirty_exceeded)
-			bdi->dirty_exceeded = 1;
+			bdi->dirty_exceeded = 1;	// 标记bdi超过脏页限制
 
 		/* Note: nr_reclaimable denotes nr_dirty + nr_unstable.
 		 * Unstable writes are a feature of certain networked
@@ -536,9 +556,13 @@ static void balance_dirty_pages(struct address_space *mapping,
 		 * threshold otherwise wait until the disk writes catch
 		 * up.
 		 */
+		// 如果当前的bdi可回收页数大于bdi阈值，进行写回
+		// 如果bdi脏页超过阈值
 		if (bdi_nr_reclaimable > bdi_thresh) {
-			writeback_inodes_wbc(&wbc);
+			writeback_inodes_wbc(&wbc);	// 执行写回
+			// 更新已写回页数
 			pages_written += write_chunk - wbc.nr_to_write;
+			// 重新获取阈值
 			get_dirty_limits(&background_thresh, &dirty_thresh,
 				       &bdi_thresh, bdi);
 		}
@@ -553,35 +577,45 @@ static void balance_dirty_pages(struct address_space *mapping,
 		 * actually dirty; with m+n sitting in the percpu
 		 * deltas.
 		 */
+		// 如果bdi阈值过低，则更新bdi的统计数据
 		if (bdi_thresh < 2*bdi_stat_error(bdi)) {
 			bdi_nr_reclaimable = bdi_stat_sum(bdi, BDI_RECLAIMABLE);
 			bdi_nr_writeback = bdi_stat_sum(bdi, BDI_WRITEBACK);
 		} else if (bdi_nr_reclaimable) {
+			// 重新获取bdi的脏页数和写回页数
 			bdi_nr_reclaimable = bdi_stat(bdi, BDI_RECLAIMABLE);
 			bdi_nr_writeback = bdi_stat(bdi, BDI_WRITEBACK);
 		}
 
+		// 如果bdi脏页在阈值以下，结束循环
 		if (bdi_nr_reclaimable + bdi_nr_writeback <= bdi_thresh)
 			break;
+		// 如果已写回足够的页数，退出循环
 		if (pages_written >= write_chunk)
 			break;		/* We've done our duty */
 
+		// 设置当前任务状态为可中断
 		__set_current_state(TASK_INTERRUPTIBLE);
+		// 延迟一定时间
 		io_schedule_timeout(pause);
 
 		/*
 		 * Increase the delay for each loop, up to our previous
 		 * default of taking a 100ms nap.
 		 */
+		// 增加延迟时间，最多100毫秒
 		pause <<= 1;
 		if (pause > HZ / 10)
+			// 限制最大等待时间
 			pause = HZ / 10;
 	}
 
+	// 如果bdi脏页数回落至阈值以下，重置标记
 	if (bdi_nr_reclaimable + bdi_nr_writeback < bdi_thresh &&
 			bdi->dirty_exceeded)
 		bdi->dirty_exceeded = 0;
 
+	// 如果bdi仍在执行写回，返回
 	if (writeback_in_progress(bdi))
 		return;
 
@@ -593,10 +627,17 @@ static void balance_dirty_pages(struct address_space *mapping,
 	 * In normal mode, we start background writeout at the lower
 	 * background_thresh, to keep the amount of dirty memory low.
 	 */
+	/*
+	 * 在笔记本模式中，我们等到达到较高阈值才开始后台写回，并且写回到较低阈值。
+	 * 这样缓慢的写操作导致最小的磁盘活动。
+	 * 在正常模式中，我们在较低的背景阈值处开始后台写回，以保持脏内存量较低。
+	 */
+	// 根据笔记本模式或背景阈值判断是否启动写回
 	if ((laptop_mode && pages_written) ||
 	    (!laptop_mode && ((global_page_state(NR_FILE_DIRTY)
 			       + global_page_state(NR_UNSTABLE_NFS))
 					  > background_thresh)))
+		// 启动bdi写回
 		bdi_start_writeback(bdi, NULL, 0);
 }
 
@@ -626,27 +667,47 @@ static DEFINE_PER_CPU(unsigned long, bdp_ratelimits) = 0;
  * limit we decrease the ratelimiting by a lot, to prevent individual processes
  * from overshooting the limit by (ratelimit_pages) each.
  */
+/**
+ * balance_dirty_pages_ratelimited_nr - 平衡脏页的状态
+ * @mapping: 发生脏写的地址空间
+ * @nr_pages_dirtied: 调用者刚刚脏写的页面数
+ *
+ * 对于正在进行脏写的进程应该调用此函数，每脏写一个页面调用一次。此函数将周期性地检查系统的
+ * 脏页状态，并在需要时启动回写（writeback）。
+ *
+ * 在大型机上，获取回写状态的操作代价较高，因此尽量避免频繁调用（通过速率限制）。但一旦
+ * 超过了脏内存限制，我们将大幅降低速率限制，以防止单个进程每次超出限制 (ratelimit_pages)。
+ */
 void balance_dirty_pages_ratelimited_nr(struct address_space *mapping,
 					unsigned long nr_pages_dirtied)
 {
-	unsigned long ratelimit;
-	unsigned long *p;
+	unsigned long ratelimit;	// 速率限制的页数
+	unsigned long *p;	// 指向当前CPU上的脏页计数的指针
 
-	ratelimit = ratelimit_pages;
+	ratelimit = ratelimit_pages;	// 从全局设置获取初始的速率限制
 	if (mapping->backing_dev_info->dirty_exceeded)
-		ratelimit = 8;
+		ratelimit = 8;	// 如果脏页超标，则减少速率限制
 
 	/*
 	 * Check the rate limiting. Also, we do not want to throttle real-time
 	 * tasks in balance_dirty_pages(). Period.
 	 */
+	/*
+	 * 检查速率限制。此外，我们不想在 balance_dirty_pages() 中限制实时任务。
+	 * 禁用抢占，保证下面的操作不会被中断。
+	 */
 	preempt_disable();
+	// 获取当前CPU上的脏页限制
 	p =  &__get_cpu_var(bdp_ratelimits);
+	// 增加当前CPU的脏页计数
 	*p += nr_pages_dirtied;
+	// 如果超出了限制
 	if (unlikely(*p >= ratelimit)) {
+		// 尝试回写的页面数量。
 		ratelimit = sync_writeback_pages(*p);
-		*p = 0;
-		preempt_enable();
+		*p = 0;	// 重置计数器
+		preempt_enable();	// 重新启用抢占
+		// 平衡脏页
 		balance_dirty_pages(mapping, ratelimit);
 		return;
 	}
@@ -656,31 +717,45 @@ EXPORT_SYMBOL(balance_dirty_pages_ratelimited_nr);
 
 void throttle_vm_writeout(gfp_t gfp_mask)
 {
+	// 后台回写阈值
 	unsigned long background_thresh;
+	// 脏页阈值
 	unsigned long dirty_thresh;
 
-        for ( ; ; ) {
+	for ( ; ; ) {
 		get_dirty_limits(&background_thresh, &dirty_thresh, NULL, NULL);
 
-                /*
-                 * Boost the allowable dirty threshold a bit for page
-                 * allocators so they don't get DoS'ed by heavy writers
-                 */
-                dirty_thresh += dirty_thresh / 10;      /* wheeee... */
+		/*
+		 * Boost the allowable dirty threshold a bit for page
+		 * allocators so they don't get DoS'ed by heavy writers
+		 */
+		/*
+		 * 对于页面分配器，适当提高可接受的脏页阈值，以防止因大量写操作
+		 * 而导致拒绝服务（DoS）
+		 */
+		// 增加10%的阈值
+		dirty_thresh += dirty_thresh / 10;      /* wheeee... */
 
-                if (global_page_state(NR_UNSTABLE_NFS) +
-			global_page_state(NR_WRITEBACK) <= dirty_thresh)
-                        	break;
-                congestion_wait(BLK_RW_ASYNC, HZ/10);
+		// 如果当前脏页数低于阈值，退出循环
+		if (global_page_state(NR_UNSTABLE_NFS) +
+		global_page_state(NR_WRITEBACK) <= dirty_thresh)
+												break;
+		// 等待一段时间，减少系统拥堵
+		congestion_wait(BLK_RW_ASYNC, HZ/10);
 
 		/*
 		 * The caller might hold locks which can prevent IO completion
 		 * or progress in the filesystem.  So we cannot just sit here
 		 * waiting for IO to complete.
 		 */
+		/*
+		 * 调用者可能持有锁，这些锁可以阻止IO的完成或文件系统的进展。
+		 * 因此我们不能仅仅坐在这里等待IO完成。
+		 */
+		// 如果不允许文件系统操作或IO，也退出循环
 		if ((gfp_mask & (__GFP_FS|__GFP_IO)) != (__GFP_FS|__GFP_IO))
 			break;
-        }
+		}
 }
 
 static void laptop_timer_fn(unsigned long unused);
@@ -817,50 +892,73 @@ void __init page_writeback_init(void)
  * WB_SYNC_ALL then we were called for data integrity and we must wait for
  * existing IO to complete.
  */
+/*
+ * write_cache_pages - 遍历给定地址空间的脏页列表并对所有这些页执行writepage()
+ * @mapping: 要写入的地址空间结构
+ * @wbc: 从 *@wbc->nr_to_write 中减去已写入的页数
+ * @writepage: 为每页调用的函数
+ * @data: 传递给writepage函数的数据
+ *
+ * 如果某页已经在I/O处理中，则write_cache_pages()会跳过它，即使它是脏页。
+ * 这对于内存清理写回是理想的行为，但对于诸如fsync()这样的数据完整性系统调用来说是错误的。
+ * fsync()和msync()需要确保在调用时是脏的所有数据都启动了新的I/O。
+ * 如果wbc->sync_mode是WB_SYNC_ALL，则意味着我们是为了数据完整性被调用的，我们必须等待现有的I/O完成。
+ */
 int write_cache_pages(struct address_space *mapping,
 		      struct writeback_control *wbc, writepage_t writepage,
 		      void *data)
 {
-	int ret = 0;
-	int done = 0;
-	struct pagevec pvec;
-	int nr_pages;
+	int ret = 0;	// 函数返回值
+	int done = 0;	// 完成标志，用于控制循环
+	struct pagevec pvec;	// 页面向量，用于批量处理页
+	int nr_pages;	// 临时存储找到的脏页数量
+	// 记录上一次的回写位置
 	pgoff_t uninitialized_var(writeback_index);
-	pgoff_t index;
+	pgoff_t index;	// 当前处理的页的索引
+	// 结束索引，包括此页
 	pgoff_t end;		/* Inclusive */
-	pgoff_t done_index;
-	int cycled;
-	int range_whole = 0;
-	long nr_to_write = wbc->nr_to_write;
+	pgoff_t done_index;	// 完成处理的最后一个页的索引
+	int cycled;	// 是否已循环至文件起始
+	int range_whole = 0;	// 是否处理整个范围
+	long nr_to_write = wbc->nr_to_write;	// 初始化需要写回的页数
 
-	pagevec_init(&pvec, 0);
+	pagevec_init(&pvec, 0);	// 初始化页面向量
+	// 如果是循环写回模式
 	if (wbc->range_cyclic) {
+		 // 从上次写回的索引开始
 		writeback_index = mapping->writeback_index; /* prev offset */
 		index = writeback_index;
 		if (index == 0)
 			cycled = 1;
 		else
 			cycled = 0;
+		// 循环模式下没有结束索引，设置为-1
 		end = -1;
-	} else {
+	} else {	// 如果不是循环模式
+		// 计算起始位置
 		index = wbc->range_start >> PAGE_CACHE_SHIFT;
+		// 计算结束位置
 		end = wbc->range_end >> PAGE_CACHE_SHIFT;
 		if (wbc->range_start == 0 && wbc->range_end == LLONG_MAX)
 			range_whole = 1;
+		// 忽略循环测试
 		cycled = 1; /* ignore range_cyclic tests */
 	}
 retry:
 	done_index = index;
 	while (!done && (index <= end)) {
 		int i;
-
+		
+		// 查找脏页
 		nr_pages = pagevec_lookup_tag(&pvec, mapping, &index,
 			      PAGECACHE_TAG_DIRTY,
 			      min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1);
+		// 如果没有找到脏页，跳出循环
 		if (nr_pages == 0)
 			break;
 
 		for (i = 0; i < nr_pages; i++) {
+			// 获取页面
 			struct page *page = pvec.pages[i];
 
 			/*
@@ -875,12 +973,13 @@ retry:
 				 * can't be range_cyclic (1st pass) because
 				 * end == -1 in that case.
 				 */
-				done = 1;
+				done = 1;	// 如果页面索引超出范围，设置完成标志
 				break;
 			}
 
 			done_index = page->index + 1;
 
+			// 锁定页面
 			lock_page(page);
 
 			/*
@@ -891,32 +990,38 @@ retry:
 			 * even if there is now a new, dirty page at the same
 			 * pagecache address.
 			 */
+			// 如果页面不属于当前地址空间
 			if (unlikely(page->mapping != mapping)) {
 continue_unlock:
-				unlock_page(page);
-				continue;
+				unlock_page(page);	// 解锁页面
+				continue;	// 继续处理下一个页面
 			}
 
+			// 如果页面不是脏的
 			if (!PageDirty(page)) {
 				/* someone wrote it for us */
-				goto continue_unlock;
+				goto continue_unlock;	// 继续处理下一个页面
 			}
 
 			if (PageWriteback(page)) {
+				// 如果页面已在写回中且不是非同步模式
 				if (wbc->sync_mode != WB_SYNC_NONE)
+					// 等待写回完成
 					wait_on_page_writeback(page);
 				else
 					goto continue_unlock;
 			}
 
 			BUG_ON(PageWriteback(page));
+			// 清除页面的脏标记以准备写回
 			if (!clear_page_dirty_for_io(page))
 				goto continue_unlock;
 
+			// 调用写页函数
 			ret = (*writepage)(page, wbc, data);
 			if (unlikely(ret)) {
 				if (ret == AOP_WRITEPAGE_ACTIVATE) {
-					unlock_page(page);
+					unlock_page(page);	// 解锁页面
 					ret = 0;
 				} else {
 					/*
@@ -928,7 +1033,7 @@ continue_unlock:
 					 * not be suitable for data integrity
 					 * writeout).
 					 */
-					done = 1;
+					done = 1;	// 发生错误，设置完成标志
 					break;
 				}
  			}
@@ -947,14 +1052,15 @@ continue_unlock:
 					 * pages, but have not synced all of the
 					 * old dirty pages.
 					 */
-					done = 1;
+					done = 1;	// 达到写回页数限制，设置完成标志
 					break;
 				}
 			}
 		}
-		pagevec_release(&pvec);
-		cond_resched();
+		pagevec_release(&pvec);	// 释放页面向量
+		cond_resched();		// 让出CPU
 	}
+		// 如果是循环模式且索引超出范围
 	if (!cycled && !done) {
 		/*
 		 * range_cyclic:
@@ -962,17 +1068,18 @@ continue_unlock:
 		 * back to the start of the file
 		 */
 		cycled = 1;
-		index = 0;
-		end = writeback_index - 1;
+		index = 0;	// 从头开始
+		end = writeback_index - 1;	// 设置新的结束索引
 		goto retry;
 	}
 	if (!wbc->no_nrwrite_index_update) {
 		if (wbc->range_cyclic || (range_whole && nr_to_write > 0))
+			// 更新写回索引
 			mapping->writeback_index = done_index;
 		wbc->nr_to_write = nr_to_write;
 	}
 
-	return ret;
+	return ret;		// 返回结果
 }
 EXPORT_SYMBOL(write_cache_pages);
 
@@ -980,13 +1087,24 @@ EXPORT_SYMBOL(write_cache_pages);
  * Function used by generic_writepages to call the real writepage
  * function and set the mapping flags on error
  */
+/**
+ * __writepage - 由generic_writepages使用，用于调用真正的writepage函数，并在出错时设置映射标志
+ * @page: 需要写入的页面
+ * @wbc: 写回控制结构体
+ * @data: 通常是address_space结构体的指针
+ * 
+ * 这个函数由generic_writepages调用，其主要作用是调用具体的writepage函数，并处理错误。
+ */
 static int __writepage(struct page *page, struct writeback_control *wbc,
 		       void *data)
 {
+	// 从data中获取地址空间结构体
 	struct address_space *mapping = data;
+	// 调用地址空间操作中的writepage函数
 	int ret = mapping->a_ops->writepage(page, wbc);
+	// 设置地址空间的错误状态
 	mapping_set_error(mapping, ret);
-	return ret;
+	return ret;	// 返回操作结果
 }
 
 /**
@@ -997,13 +1115,22 @@ static int __writepage(struct page *page, struct writeback_control *wbc,
  * This is a library function, which implements the writepages()
  * address_space_operation.
  */
+/**
+ * generic_writepages - 遍历给定地址空间的脏页列表并对所有这些页执行writepage()
+ * @mapping: 要写入的地址空间结构
+ * @wbc: 从 *@wbc->nr_to_write 中减去已写入的页数
+ *
+ * 这是一个库函数，实现了 writepages() 地址空间操作。
+ */
 int generic_writepages(struct address_space *mapping,
 		       struct writeback_control *wbc)
 {
 	/* deal with chardevs and other special file */
+	/* 处理字符设备和其他特殊文件 */
 	if (!mapping->a_ops->writepage)
-		return 0;
+		return 0;	// 如果地址空间没有定义writepage操作，则直接返回0
 
+	// 调用write_cache_pages函数执行写操作，传入__writepage作为操作每一页的回调函数
 	return write_cache_pages(mapping, wbc, __writepage, mapping);
 }
 
@@ -1013,11 +1140,15 @@ int do_writepages(struct address_space *mapping, struct writeback_control *wbc)
 {
 	int ret;
 
+	// 检查是否还有页面需要写回，如果不需要写回则直接返回成功
 	if (wbc->nr_to_write <= 0)
 		return 0;
+	// 检查地址空间操作结构是否有定义writepages方法
 	if (mapping->a_ops->writepages)
+		// 如果定义了，则调用该方法进行页面写回
 		ret = mapping->a_ops->writepages(mapping, wbc);
 	else
+		 // 如果未定义，使用通用的writepages方法进行页面写回
 		ret = generic_writepages(mapping, wbc);
 	return ret;
 }

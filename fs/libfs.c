@@ -820,23 +820,31 @@ EXPORT_SYMBOL_GPL(generic_fh_to_parent);
 int simple_fsync(struct file *file, struct dentry *dentry, int datasync)
 {
 	struct writeback_control wbc = {
+		// 设置写回控制的同步模式为全部同步
 		.sync_mode = WB_SYNC_ALL,
 		.nr_to_write = 0, /* metadata-only; caller takes care of data */
+		/* 仅仅同步元数据；调用者负责数据同步 */
 	};
+	// 从目录项中获取 inode 结构
 	struct inode *inode = dentry->d_inode;
-	int err;
+	int err;	// 错误码变量
 	int ret;
-
+	
+	// 同步 inode 映射到的缓存
 	ret = sync_mapping_buffers(inode->i_mapping);
+	// 如果inode 没有被标记为脏，直接返回
 	if (!(inode->i_state & I_DIRTY))
 		return ret;
+	// 如果是 datasync 并且 inode 没有为数据同步标记为脏，直接返回
 	if (datasync && !(inode->i_state & I_DIRTY_DATASYNC))
 		return ret;
 
+	// 否则，同步 inode
 	err = sync_inode(inode, &wbc);
+	// 如果之前未发生错误则使用新的错误码
 	if (ret == 0)
 		ret = err;
-	return ret;
+	return ret;	// 返回最终的错误码或成功码
 }
 EXPORT_SYMBOL(simple_fsync);
 

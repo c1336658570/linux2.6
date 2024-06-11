@@ -203,45 +203,75 @@ EXPORT_SYMBOL(file_fsync);
  * only @dentry is set.  This can only happen when the filesystem
  * implements the export_operations API.
  */
+/**
+ * vfs_fsync_range - 辅助函数，用于将数据和元数据的一个范围同步到磁盘
+ * @file: 需要同步的文件
+ * @dentry: file的目录项
+ * @start: 要同步的数据范围开始的字节偏移
+ * @end: 要同步的数据范围结束的字节偏移（包含此偏移）
+ * @datasync: 只执行datasync操作
+ *
+ * 将 @start 到 @end 范围内的数据和 @file 的元数据写回磁盘。如果
+ * 设置了 @datasync，则只写入访问修改后的文件数据所需的元数据。
+ *
+ * 如果此函数从 nfsd 调用，@file 可能为 %NULL，
+ * 只设置了 @dentry。这只在文件系统实现了 export_operations API 时发生。
+ */
 int vfs_fsync_range(struct file *file, struct dentry *dentry, loff_t start,
 		    loff_t end, int datasync)
 {
+	// 文件操作结构指针
 	const struct file_operations *fop;
+	// 地址空间结构指针
 	struct address_space *mapping;
-	int err, ret;
+	int err, ret;		// 错误码和返回值
 
 	/*
 	 * Get mapping and operations from the file in case we have
 	 * as file, or get the default values for them in case we
 	 * don't have a struct file available.  Damn nfsd..
 	 */
+	/*
+     * 从文件获取映射和操作，如果我们有文件；
+     * 如果我们没有文件结构可用，则获取它们的默认值。
+     * 这对于 nfsd 来说是一个问题。
+     */
 	if (file) {
+		// 从 file 获取地址空间映射
 		mapping = file->f_mapping;
-		fop = file->f_op;
+		fop = file->f_op;	// 从 file 获取文件操作
 	} else {
+		// 从 dentry 的 inode 获取地址空间映射
 		mapping = dentry->d_inode->i_mapping;
+		// 从 dentry 的 inode 获取文件操作
 		fop = dentry->d_inode->i_fop;
 	}
 
+	// 检查文件操作和同步函数是否存在
 	if (!fop || !fop->fsync) {
-		ret = -EINVAL;
-		goto out;
+		ret = -EINVAL;	// 如果不存在，返回错误
+		goto out;	// 跳到函数末尾处理返回
 	}
 
+	// 写入并等待指定范围内的数据被写入
 	ret = filemap_write_and_wait_range(mapping, start, end);
 
 	/*
 	 * We need to protect against concurrent writers, which could cause
 	 * livelocks in fsync_buffers_list().
 	 */
-	mutex_lock(&mapping->host->i_mutex);
-	err = fop->fsync(file, dentry, datasync);
+	/*
+   * 我们需要防止并发写入者，它们可能导致在fsync_buffers_list()中死锁。
+   */
+	mutex_lock(&mapping->host->i_mutex);	// 锁定互斥量以防并发写入
+	err = fop->fsync(file, dentry, datasync);	// 执行文件的同步操作
 	if (!ret)
-		ret = err;
+		ret = err;	// 如果之前没有错误，现在赋予新的错误或成功码
+	// 解锁互斥量
 	mutex_unlock(&mapping->host->i_mutex);
 
 out:
-	return ret;
+	return ret;	// 返回结果
 }
 EXPORT_SYMBOL(vfs_fsync_range);
 
@@ -258,32 +288,57 @@ EXPORT_SYMBOL(vfs_fsync_range);
  * only @dentry is set.  This can only happen when the filesystem
  * implements the export_operations API.
  */
+/**
+ * vfs_fsync - 对一个文件执行 fsync 或 fdatasync 操作
+ * @file: 需要同步的文件
+ * @dentry: file的目录项
+ * @datasync: 只执行 fdatasync 操作
+ *
+ * 将 @file 的数据和元数据写回到磁盘。如果设置了 @datasync，则只写入
+ * 访问修改后的文件数据所需的元数据。
+ *
+ * 如果此函数从 nfsd 调用，@file 可能为 %NULL，
+ * 只设置了 @dentry。这只在文件系统实现了 export_operations API 时发生。
+ */
 int vfs_fsync(struct file *file, struct dentry *dentry, int datasync)
 {
+	// 对整个文件进行同步，范围是从文件开始到最大长整型值
 	return vfs_fsync_range(file, dentry, 0, LLONG_MAX, datasync);
 }
 EXPORT_SYMBOL(vfs_fsync);
 
+// do_fsync - 执行文件的同步操作
 static int do_fsync(unsigned int fd, int datasync)
 {
-	struct file *file;
-	int ret = -EBADF;
+	struct file *file;	// 定义文件结构指针
+	int ret = -EBADF;		// 默认返回值设为 -EBADF，表示无效的文件描述符错误
 
+	// 通过文件描述符获取文件结构
 	file = fget(fd);
-	if (file) {
+	if (file) {	// 如果文件结构有效
+		// 对文件执行同步操作
 		ret = vfs_fsync(file, file->f_path.dentry, datasync);
-		fput(file);
+		fput(file);	// 释放文件结构
 	}
-	return ret;
+	return ret;	// 返回操作结果
 }
 
+// 系统调用，对文件执行 fsync
 SYSCALL_DEFINE1(fsync, unsigned int, fd)
 {
+	// 调用 do_fsync，传入 datasync 参数为 0（执行全同步）
 	return do_fsync(fd, 0);
 }
 
+// 系统调用，对文件执行 fdatasync，不会回写被修改的元数据，
+// 除非对于一些对于数据完整性检索有关的场景。例如，若仅是文件的
+// 最后一次访问时间（st_atime）或最后一次修改时间（st_mtime）
+// 发生变化是不需要同步元数据的，因为它不会影响文件数据块的检索，
+// 若是文件的大小改变了（st_isize）则显然是需要同步元数据的，
+// 若不同步则可能导致系统崩溃后无法检索修改的数据。
 SYSCALL_DEFINE1(fdatasync, unsigned int, fd)
 {
+	// 调用 do_fsync，传入 datasync 参数为 1
 	return do_fsync(fd, 1);
 }
 
@@ -295,13 +350,24 @@ SYSCALL_DEFINE1(fdatasync, unsigned int, fd)
  *
  * This is just a simple wrapper about our general syncing function.
  */
+/**
+ * generic_write_sync - 如果文件/索引节点需要同步，则在写操作后执行同步操作
+ * @file: 发生写操作的文件
+ * @pos: 写操作开始的偏移量
+ * @count: 写操作的长度
+ *
+ * 这只是一个关于我们通用同步函数的简单封装。
+ */
 int generic_write_sync(struct file *file, loff_t pos, loff_t count)
 {
+	// 检查文件的标志位中是否没有设置 O_DSYNC 且 文件的索引节点不是同步模式
 	if (!(file->f_flags & O_DSYNC) && !IS_SYNC(file->f_mapping->host))
-		return 0;
+		return 0;	// 如果都不需要同步，则直接返回0，不进行同步操作
+	// 否则，执行范围同步，范围是从 pos 到 pos + count - 1
 	return vfs_fsync_range(file, file->f_path.dentry, pos,
 			       pos + count - 1,
 			       (file->f_flags & __O_SYNC) ? 0 : 1);
+	// 如果文件的标志位中设置了 __O_SYNC，则第五个参数为0，否则为1
 }
 EXPORT_SYMBOL(generic_write_sync);
 

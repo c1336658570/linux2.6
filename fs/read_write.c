@@ -376,45 +376,76 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 
 EXPORT_SYMBOL(vfs_write);
 
+// 定义内联函数用于读取文件的当前位置。
 static inline loff_t file_pos_read(struct file *file)
 {
-	return file->f_pos;
+	return file->f_pos;	// 返回文件位置字段。
 }
 
+// 定义内联函数用于设置文件的当前位置。
 static inline void file_pos_write(struct file *file, loff_t pos)
 {
+	// 设置文件位置字段。
 	file->f_pos = pos;
 }
 
+/*
+ * 系统调用定义，接受三个参数：文件描述符、用户空间的缓冲区地址和要读取的字节数。
+ */
 SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 {
-	struct file *file;
-	ssize_t ret = -EBADF;
-	int fput_needed;
+	struct file *file;	// 文件结构指针，用于引用文件
+	ssize_t ret = -EBADF;// 默认返回值设置为“无效的文件描述符”错误。
+	int fput_needed;	// 用于跟踪文件是否需要释放的标记。
 
+	/*
+	 * 尝试获取与文件描述符关联的文件结构。fget_light 是一个轻量级的版本，
+	 * 它不会完全增加文件的使用计数，而是返回一个标志（fput_needed）以指示是否需要后续减少引用。
+	 */
 	file = fget_light(fd, &fput_needed);
-	if (file) {
+	if (file) {	// 如果文件描述符有效，即能获取到文件结构。
+	// 读取文件的当前位置。
 		loff_t pos = file_pos_read(file);
+		/*
+		 * 执行实际上的读操作。vfs_read 是 VFS 层提供的读函数，
+		 * 它会调用相应文件系统的读方法。传入的参数包括文件结构、缓冲区、计数和位置。
+		 */
 		ret = vfs_read(file, buf, count, &pos);
-		file_pos_write(file, pos);
-		fput_light(file, fput_needed);
+		file_pos_write(file, pos);	// 更新文件的位置。
+		fput_light(file, fput_needed);	// 根据 fput_needed 的值减少文件的引用计数。
 	}
 
 	return ret;
 }
 
+/*
+ * 系统调用定义，接受三个参数：文件描述符、用户空间的缓冲区地址和要写入的字节数。
+ */
 SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 		size_t, count)
 {
+	// 文件结构指针，用于引用文件。
 	struct file *file;
+	// 默认返回值设置为“无效的文件描述符”错误。
 	ssize_t ret = -EBADF;
+	// 用于跟踪文件是否需要释放的标记。
 	int fput_needed;
 
+	/*
+	 * 尝试获取与文件描述符关联的文件结构。fget_light 是一个轻量级的版本，
+	 * 它不会完全增加文件的使用计数，而是返回一个标志（fput_needed）以指示是否需要后续减少引用。
+	 */
 	file = fget_light(fd, &fput_needed);
-	if (file) {
+	if (file) {	// 如果文件描述符有效，即能获取到文件结构。
+	// 读取文件的当前位置。
 		loff_t pos = file_pos_read(file);
+		/*
+		 * 执行实际上的写操作。vfs_write 是 VFS 层提供的写函数，
+		 * 它会调用相应文件系统的写方法。传入的参数包括文件结构、缓冲区、计数和位置。
+		 */
 		ret = vfs_write(file, buf, count, &pos);
-		file_pos_write(file, pos);
+		file_pos_write(file, pos);	// 更新文件的位置。
+		// 根据 fput_needed 的值减少文件的引用计数。
 		fput_light(file, fput_needed);
 	}
 

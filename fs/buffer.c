@@ -54,18 +54,26 @@ init_buffer(struct buffer_head *bh, bh_end_io_t *handler, void *private)
 }
 EXPORT_SYMBOL(init_buffer);
 
+/*
+ * 同步缓冲区的辅助函数，被等待函数调用以促进缓冲区的解锁。
+ */
 static int sync_buffer(void *word)
 {
+	// 定义一个块设备的指针
 	struct block_device *bd;
+	// 从b_state成员的地址获取整个buffer_head结构的地址
 	struct buffer_head *bh
 		= container_of(word, struct buffer_head, b_state);
 
+	// 内存屏障，确保之前的内存操作不会与后面的操作重叠
 	smp_mb();
+	// 获取buffer_head所属的块设备
 	bd = bh->b_bdev;
+	// 如果块设备存在，则运行该设备对应的地址空间
 	if (bd)
 		blk_run_address_space(bd->bd_inode->i_mapping);
-	io_schedule();
-	return 0;
+	io_schedule();	// 调度其他I/O操作，让出处理器
+	return 0;	// 返回0表示函数执行成功
 }
 
 void __lock_buffer(struct buffer_head *bh)
@@ -88,8 +96,13 @@ EXPORT_SYMBOL(unlock_buffer);
  * from becoming locked again - you have to lock it yourself
  * if you want to preserve its state.
  */
+/*
+ * 等待直到一个缓冲区解锁。这并不会阻止它再次被锁定——如果你想保持它的状态，
+ * 你需要自己锁定它。
+ */
 void __wait_on_buffer(struct buffer_head * bh)
 {
+	// 等待特定的位（BH_Lock）在给定的位字段（bh->b_state）中被清除，使用的等待方式是不可中断的等待
 	wait_on_bit(&bh->b_state, BH_Lock, sync_buffer, TASK_UNINTERRUPTIBLE);
 }
 EXPORT_SYMBOL(__wait_on_buffer);
@@ -611,15 +624,28 @@ void emergency_thaw_all(void)
  * @mapping is a file or directory which needs those buffers to be written for
  * a successful fsync().
  */
+/**
+ * sync_mapping_buffers - 写出并等待一个映射的“关联”缓冲区
+ * @mapping: 需要写出这些缓冲区的映射
+ *
+ * 启动映射->private_list中的缓冲区的I/O，并等待该I/O。
+ *
+ * 基本上，这是一个用于 fsync() 的便利函数。
+ * @mapping 是一个文件或目录，需要这些缓冲区被写出以便
+ * 成功执行 fsync()。
+ */
 int sync_mapping_buffers(struct address_space *mapping)
 {
+	// 获取关联的映射
 	struct address_space *buffer_mapping = mapping->assoc_mapping;
 
+	// 如果关联的映射为空或者私有列表为空，则无需操作，直接返回0
 	if (buffer_mapping == NULL || list_empty(&mapping->private_list))
 		return 0;
 
+	// 否则，执行真正的缓冲区同步操作
 	return fsync_buffers_list(&buffer_mapping->private_lock,
-					&mapping->private_list);
+					&mapping->private_list);	 // 使用关联映射的私有锁和当前映射的私有列表
 }
 EXPORT_SYMBOL(sync_mapping_buffers);
 
@@ -753,27 +779,59 @@ EXPORT_SYMBOL(__set_page_dirty_buffers);
  * the osync code to catch these locked, dirty buffers without requeuing
  * any newly dirty buffers for write.
  */
+/*
+ * 写出并等待一系列缓冲区。
+ *
+ * 我们面临着冲突的压力：我们想确保所有最初脏的缓冲区都被等待，
+ * 但那些随后变脏的缓冲区则不需要。毕竟，如果有人在活跃地写文件，
+ * 我们不希望fsync持续不断。
+ *
+ * 这个过程分为两个主要阶段：首先，我们将脏缓冲区复制到一个临时的inode列表中，
+ * 在这个过程中进行写操作。然后，我们进行清理，等待这些写操作完成。
+ * 
+ * 在这第二阶段中，任何对文件的后续更新可能会再次将缓冲区放回原始inode的脏列表中，
+ * 所以可能会出现一个已经排队等待写入但还没有完成的缓冲区在该列表上。
+ * 因此，作为最终清理，我们通过osync代码来捕获这些锁定的、脏的缓冲区，
+ * 同时不会重新排队等待任何新变脏的缓冲区写入。
+ */
+/**
+ * 一个用于同步（写出并等待完成）特定列表中所有缓冲区的函数。
+ * 函数通过两个阶段处理：首先，将所有脏缓冲区移到一个临时列表
+ * 并启动I/O操作；其次，等待这些I/O操作完成，并处理在此期间
+ * 可能再次变脏的缓冲区。这个设计防止了在文件持续被写入时 
+ * fsync 操作无休止执行的问题。
+ */
 static int fsync_buffers_list(spinlock_t *lock, struct list_head *list)
 {
-	struct buffer_head *bh;
-	struct list_head tmp;
+	struct buffer_head *bh;	// 缓冲区头部
+	struct list_head tmp;		// 临时列表
 	struct address_space *mapping, *prev_mapping = NULL;
-	int err = 0, err2;
+	int err = 0, err2;	// 错误码
 
+	// 初始化一个空的临时链表
 	INIT_LIST_HEAD(&tmp);
-
+	
+	// 锁住给定的锁
 	spin_lock(lock);
+	// 循环遍历列表直到为空
 	while (!list_empty(list)) {
+		// 从列表中获取下一个缓冲区头
 		bh = BH_ENTRY(list->next);
+		// 获取该缓冲区的地址空间
 		mapping = bh->b_assoc_map;
+		// 从关联队列中移除此缓冲区头
 		__remove_assoc_queue(bh);
 		/* Avoid race with mark_buffer_dirty_inode() which does
 		 * a lockless check and we rely on seeing the dirty bit */
+		/* 避免与mark_buffer_dirty_inode()的竞争，后者在无锁情况下检查，我们依赖看到脏位 */
 		smp_mb();
+		// 如果缓冲区是脏的或者锁定的
 		if (buffer_dirty(bh) || buffer_locked(bh)) {
+			// 添加到临时列表
 			list_add(&bh->b_assoc_buffers, &tmp);
 			bh->b_assoc_map = mapping;
 			if (buffer_dirty(bh)) {
+				// 增加引用计数
 				get_bh(bh);
 				spin_unlock(lock);
 				/*
@@ -781,6 +839,10 @@ static int fsync_buffers_list(spinlock_t *lock, struct list_head *list)
 				 * ll_rw_block() actually writes the current
 				 * contents - it is a noop if I/O is still in
 				 * flight on potentially older contents.
+				 */
+				/*
+				 * 确保任何悬挂的I/O完成，这样ll_rw_block()实际上写入当前内容 - 
+				 * 如果I/O还在更老的内容上进行，那么这是一个空操作。
 				 */
 				ll_rw_block(SWRITE_SYNC_PLUG, 1, &bh);
 
@@ -790,17 +852,22 @@ static int fsync_buffers_list(spinlock_t *lock, struct list_head *list)
 				 * wait_on_buffer() will do that for us
 				 * through sync_buffer().
 				 */
+				/*
+				 * 启动前一个映射的IO。注意，我们不会运行最后一个映射，
+				 * wait_on_buffer()会通过sync_buffer()为我们进行。
+				 */
 				if (prev_mapping && prev_mapping != mapping)
 					blk_run_address_space(prev_mapping);
 				prev_mapping = mapping;
 
-				brelse(bh);
-				spin_lock(lock);
+				brelse(bh);	// 减少引用计数
+				spin_lock(lock);	// 重新上锁
 			}
 		}
 	}
 
 	while (!list_empty(&tmp)) {
+		// 从临时列表中获取前一个缓冲区头
 		bh = BH_ENTRY(tmp.prev);
 		get_bh(bh);
 		mapping = bh->b_assoc_map;
@@ -809,24 +876,28 @@ static int fsync_buffers_list(spinlock_t *lock, struct list_head *list)
 		 * a lockless check and we rely on seeing the dirty bit */
 		smp_mb();
 		if (buffer_dirty(bh)) {
+			// 将脏缓冲区添加到私有列表
 			list_add(&bh->b_assoc_buffers,
 				 &mapping->private_list);
 			bh->b_assoc_map = mapping;
 		}
 		spin_unlock(lock);
+		// 等待缓冲区的I/O完成
 		wait_on_buffer(bh);
+		// 如果缓冲区不是最新的，记录输入输出错误
 		if (!buffer_uptodate(bh))
 			err = -EIO;
 		brelse(bh);
 		spin_lock(lock);
 	}
 	
-	spin_unlock(lock);
+	spin_unlock(lock);	// 解锁
+	// 处理可能遗留的锁定或脏缓冲区
 	err2 = osync_buffers_list(lock, list);
 	if (err)
-		return err;
+		return err;	// 返回第一个错误
 	else
-		return err2;
+		return err2;	// 否则返回第二个错误
 }
 
 /*

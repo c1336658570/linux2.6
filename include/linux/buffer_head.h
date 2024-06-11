@@ -370,10 +370,17 @@ map_bh(struct buffer_head *bh, struct super_block *sb, sector_t block)
  * __wait_on_buffer() just to trip a debug check.  Because debug code in inline
  * functions is bloaty.
  */
+/*
+ * 在零引用计数的缓冲区上调用 wait_on_buffer() 是非法的，所以我们调用 __wait_on_buffer()
+ * 只是为了触发一个调试检查。因为在内联函数中包含调试代码会导致代码膨胀。
+ */
 static inline void wait_on_buffer(struct buffer_head *bh)
 {
+	// 表示当前上下文可能会使进程休眠，用于调试目的，确保不在禁止休眠的上下文中调用此函数。
 	might_sleep();
+	// 检查缓冲区是否被锁定或者引用计数是否为0
 	if (buffer_locked(bh) || atomic_read(&bh->b_count) == 0)
+		// 如果缓冲区被锁定或引用计数为0，则等待缓冲区解锁，这主要是为了调试，确保不会在不应该的时候调用此函数。
 		__wait_on_buffer(bh);
 }
 

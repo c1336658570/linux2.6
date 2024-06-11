@@ -1584,13 +1584,26 @@ EXPORT_SYMBOL(write_inode_now);
  *
  * The caller must have a ref on the inode.
  */
+/**
+ * sync_inode - 将一个inode及其页写入磁盘。
+ * @inode: 需要同步的inode
+ * @wbc: 控制回写模式的控制结构
+ *
+ * sync_inode() 将把一个inode及其页写入磁盘。它还会正确地更新inode在其超级块的脏inode列表上的位置，
+ * 并会更新 inode->i_state。
+ *
+ * 调用者必须持有一个对inode的引用。
+ */
 int sync_inode(struct inode *inode, struct writeback_control *wbc)
 {
 	int ret;
 
+	// 锁定inode锁，防止其他进程同时修改
 	spin_lock(&inode_lock);
+	// 调用writeback_single_inode函数对单个inode进行写回
 	ret = writeback_single_inode(inode, wbc);
+	// 解锁inode锁
 	spin_unlock(&inode_lock);
-	return ret;
+	return ret;	// 返回writeback_single_inode的结果
 }
 EXPORT_SYMBOL(sync_inode);

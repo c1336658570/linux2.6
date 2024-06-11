@@ -44,23 +44,33 @@ enum bdi_state {
 	BDI_unused,		/* Available bits start here */
 };
 
+// 定义函数指针类型，用于设备拥塞检测
 typedef int (congested_fn)(void *, int);
 
+/*
+ * 定义不同类型的后备设备信息统计项。
+ */
 enum bdi_stat_item {
-	BDI_RECLAIMABLE,	/* 可回收的 */
-	BDI_WRITEBACK,		/* 正在写回 */
-	NR_BDI_STAT_ITEMS
+	BDI_RECLAIMABLE,	/* 可回收的: 这些项目可以被内存回收 */
+	BDI_WRITEBACK,		/* 正在写回: 数据正在被写回磁盘 */
+	NR_BDI_STAT_ITEMS	/* 后备设备信息统计项的数量 */
 };
 
+/*
+ * 定义统计批处理的大小，依据CPU数量进行计算。
+ */
 #define BDI_STAT_BATCH (8*(1+ilog2(nr_cpu_ids)))
 
+/*
+ * 描述后备设备的写回信息。
+ */
 struct bdi_writeback {
-	/* 挂在bdi下 */
+	/* 挂在bdi下的列表 */
 	struct list_head list;			/* hangs off the bdi */
 
-	/* 父bdi */
+	/* 指向父backing_dev_info的指针 */
 	struct backing_dev_info *bdi;		/* our parent bdi */
-	unsigned int nr;
+	unsigned int nr;	/* 编号 */
 
 	/* 上次老数据刷新时间 */
 	unsigned long last_old_flush;		/* last old data flush */
@@ -69,15 +79,18 @@ struct bdi_writeback {
 	struct task_struct	*task;		/* writeback task */
 	/* 脏inode列表 */
 	struct list_head	b_dirty;	/* dirty inodes */
-	/* 停车等待写回 */
+	/* 等待写回的inode链表 */
 	struct list_head	b_io;		/* parked for writeback */
-	/* 停车等待更多写回 */
+	/* 需要更多写回处理的inode链表 */
 	struct list_head	b_more_io;	/* parked for more writeback */
 };
 
+/*
+ * 后备设备信息结构。
+ */
 struct backing_dev_info {
-	struct list_head bdi_list;
-	struct rcu_head rcu_head;
+	struct list_head bdi_list;	/* BDI列表 */
+	struct rcu_head rcu_head;	/* 用于RCU同步的头部 */
 	/* 最大预读大小，以PAGE_CACHE_SIZE为单位 */
 	unsigned long ra_pages;	/* max readahead in PAGE_CACHE_SIZE units */
 	/* 使用此变量时始终使用原子位操作 */
@@ -85,25 +98,35 @@ struct backing_dev_info {
 	/* 设备能力 */
 	unsigned int capabilities; /* Device capabilities */
 	/* 如果设备是md/dm，这是函数指针 */
+	/*  拥塞检测函数 */
 	congested_fn *congested_fn; /* Function pointer if device is md/dm */
 	/* 拥塞函数的辅助数据指针 */
 	void *congested_data;	/* Pointer to aux data for congested func */
+	// 当有必要将堆积的写操作提交到设备时调用。
+	// 触发设备IO的函数
 	void (*unplug_io_fn)(struct backing_dev_info *, struct page *);
+	// 触发IO函数的数据
 	void *unplug_io_data;
 
-	char *name;
+	char *name;	// 设备的名称
 
+	/* 每个CPU的设备统计数据 */
 	struct percpu_counter bdi_stat[NR_BDI_STAT_ITEMS];
 
+	// 完成度量的本地per-cpu属性
+	/* 完成的操作统计 */
 	struct prop_local_percpu completions;
-	int dirty_exceeded;
+	/* 脏页超出标记 */
+	int dirty_exceeded;	// 标记脏页数超出限制
 
+	// 最小比例（通常与回写相关）
 	unsigned int min_ratio;
+	// 最大比例和最大比例分数
 	unsigned int max_ratio, max_prop_frac;
 
 	/* 此bdi的默认写回信息 */
 	struct bdi_writeback wb;  /* default writeback info for this bdi */
-	/* 保护wb_list更新端 */
+	/* 保护wb_list更新的锁 */
 	spinlock_t wb_lock;	  /* protects update side of wb_list */
 	/* 挂在这个bdi下的刷新线程 */
 	struct list_head wb_list; /* the flusher threads hanging off this bdi */
@@ -112,8 +135,10 @@ struct backing_dev_info {
 	/* 已注册任务的数量 */
 	unsigned int wb_cnt;	  /* number of registered tasks */
 
+	// 工作列表
 	struct list_head work_list;
 
+	// 关联的设备
 	struct device *dev;
 
 #ifdef CONFIG_DEBUG_FS
@@ -355,22 +380,37 @@ static inline bool mapping_cap_swap_backed(struct address_space *mapping)
 	return bdi_cap_swap_backed(mapping->backing_dev_info);
 }
 
+/*
+ * 调用调度器进行进程调度，通常用于I/O等待中。
+ */
 static inline int bdi_sched_wait(void *word)
 {
+	// 进行调度，让出CPU
 	schedule();
 	return 0;
 }
 
+
+/*
+ * 运行给定的后备设备的解锁函数，通常在I/O请求后调用以优化I/O处理。
+ */
 static inline void blk_run_backing_dev(struct backing_dev_info *bdi,
 				       struct page *page)
 {
+	// 检查bdi是否非空且具有unplug函数
 	if (bdi && bdi->unplug_io_fn)
+		// 调用解锁函数，传递后备设备信息和相关页面
 		bdi->unplug_io_fn(bdi, page);
 }
 
+/*
+ * 对给定的地址空间执行块设备操作，通常在完成对页的处理后调用以优化I/O处理。
+ */
 static inline void blk_run_address_space(struct address_space *mapping)
 {
+	// 如果映射存在
 	if (mapping)
+		 // 调用运行后备设备函数，传递地址空间的后备设备信息
 		blk_run_backing_dev(mapping->backing_dev_info, NULL);
 }
 

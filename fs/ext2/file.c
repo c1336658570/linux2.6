@@ -50,20 +50,23 @@ static int ext2_release_file (struct inode * inode, struct file * filp)
 int ext2_fsync(struct file *file, struct dentry *dentry, int datasync)
 {
 	int ret;
+	// 获取文件的超级块
 	struct super_block *sb = dentry->d_inode->i_sb;
+	// 获取块设备的inode的映射
 	struct address_space *mapping = sb->s_bdev->bd_inode->i_mapping;
 
-	// 简单的同步操作
+	// 执行一个简单的同步操作
 	ret = simple_fsync(file, dentry, datasync);
+	// 如果返回了输入输出错误或者检测到映射中有输入输出错误的标志位
 	if (ret == -EIO || test_and_clear_bit(AS_EIO, &mapping->flags)) {
 		/* We don't really know where the IO error happened... */
 		/* 我们并不确切知道 IO 错误发生在何处... */
-		// 记录 IO 错误
+		// 记录一个 IO 错误，并输出一条错误信息
 		ext2_error(sb, __func__,
 			   "detected IO error when writing metadata buffers");
-		ret = -EIO;
+		ret = -EIO;	// 将返回值设置为输入输出错误代码
 	}
-	return ret;
+	return ret;	// 返回结果
 }
 
 /*

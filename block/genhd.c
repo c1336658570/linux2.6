@@ -234,27 +234,40 @@ EXPORT_SYMBOL_GPL(disk_map_sector_rcu);
  * Can be deleted altogether. Later.
  *
  */
+/*
+ * 这个部分将来可以被完全删除。
+ */
 static struct blk_major_name {
-	struct blk_major_name *next;
-	int major;
-	char name[16];
+	struct blk_major_name *next;	// 链表中的下一个元素
+	int major;	// 设备的主设备号
+	char name[16];	// 设备名称
+	// 存储主设备名称的哈希表
 } *major_names[BLKDEV_MAJOR_HASH_SIZE];
 
 /* index in the above - for now: assume no multimajor ranges */
+/* 根据主设备号获得哈希表的索引，当前假设没有跨多个主设备号的范围 */
 static inline int major_to_index(int major)
 {
+	// 通过模运算得到索引
 	return major % BLKDEV_MAJOR_HASH_SIZE;
 }
 
 #ifdef CONFIG_PROC_FS
+/* 展示块设备信息 */
 void blkdev_show(struct seq_file *seqf, off_t offset)
 {
+	// 用于遍历主设备名称的指针
 	struct blk_major_name *dp;
 
+	// 如果偏移量小于哈希表大小
 	if (offset < BLKDEV_MAJOR_HASH_SIZE) {
+		// 加锁
 		mutex_lock(&block_class_lock);
+		// 遍历链表
 		for (dp = major_names[offset]; dp; dp = dp->next)
+			// 将主设备号和名称输出到seq文件
 			seq_printf(seqf, "%3d %s\n", dp->major, dp->name);
+		// 解锁
 		mutex_unlock(&block_class_lock);
 	}
 }
@@ -276,20 +289,36 @@ void blkdev_show(struct seq_file *seqf, off_t offset)
  *    then the return value is the allocated major number in range
  *    [1..255] or a negative error code otherwise
  */
+/**
+ * 注册一个新的块设备
+ *
+ * @major: 请求的主设备号 [1..255]。如果 @major=0，尝试分配任何未使用的主设备号。
+ * @name: 新块设备的名称，为零终止字符串
+ *
+ * @name 在系统内必须是唯一的。
+ *
+ * 返回值取决于 @major 输入参数。
+ *  - 如果在范围 [1..255] 中请求了一个主设备号，则函数在成功时返回零，或者返回一个负的错误代码
+ *  - 如果使用 @major=0 参数请求任何未使用的主设备号，则返回值是分配的主设备号（范围 [1..255]），否则返回负的错误代码
+ */
 int register_blkdev(unsigned int major, const char *name)
 {
 	struct blk_major_name **n, *p;
 	int index, ret = 0;
 
+	// 锁定 block_class_lock 以同步对全局资源的访问
 	mutex_lock(&block_class_lock);
 
 	/* temporary */
+	// 如果 major 为0，尝试分配一个未使用的主设备号
 	if (major == 0) {
+		// 从最后一个主设备号开始向前查找未使用的主设备号
 		for (index = ARRAY_SIZE(major_names)-1; index > 0; index--) {
 			if (major_names[index] == NULL)
 				break;
 		}
 
+		// 如果未找到未使用的主设备号
 		if (index == 0) {
 			printk("register_blkdev: failed to get major for %s\n",
 			       name);
@@ -300,56 +329,76 @@ int register_blkdev(unsigned int major, const char *name)
 		ret = major;
 	}
 
+	// 分配内存给新的块设备结构
 	p = kmalloc(sizeof(struct blk_major_name), GFP_KERNEL);
 	if (p == NULL) {
 		ret = -ENOMEM;
 		goto out;
 	}
 
+	// 初始化新块设备结构
 	p->major = major;
 	strlcpy(p->name, name, sizeof(p->name));
 	p->next = NULL;
 	index = major_to_index(major);
 
+	// 在 major_names 链表中找到合适的位置插入新的
 	for (n = &major_names[index]; *n; n = &(*n)->next) {
 		if ((*n)->major == major)
 			break;
 	}
+	// 如果没有找到相同主设备号的记录，添加新记录
 	if (!*n)
 		*n = p;
 	else
-		ret = -EBUSY;
+		ret = -EBUSY;	// 主设备号已经被占用
 
+	// 如果添加记录失败，则打印错误并释放之前分配的内存
 	if (ret < 0) {
 		printk("register_blkdev: cannot get major %d for %s\n",
 		       major, name);
 		kfree(p);
 	}
 out:
+	// 解锁
 	mutex_unlock(&block_class_lock);
 	return ret;
 }
 
 EXPORT_SYMBOL(register_blkdev);
 
+/**
+ * 注销一个块设备
+ *
+ * @major: 要注销的块设备的主设备号
+ * @name: 设备的名称
+ *
+ * 这个函数用于从系统中移除一个已注册的块设备。它会释放与该设备相关的所有资源。
+ */
 void unregister_blkdev(unsigned int major, const char *name)
 {
+	// 用于遍历 major_names 链表的指针
 	struct blk_major_name **n;
+	// 指向找到的设备的指针
 	struct blk_major_name *p = NULL;
+	// 根据设备号计算索引
 	int index = major_to_index(major);
 
+	// 加锁以保护对全局资源的访问
 	mutex_lock(&block_class_lock);
 	for (n = &major_names[index]; *n; n = &(*n)->next)
+		// 如果找到对应的主设备号
 		if ((*n)->major == major)
 			break;
+	// 如果未找到或名称不匹配
 	if (!*n || strcmp((*n)->name, name)) {
-		WARN_ON(1);
+		WARN_ON(1);	// 发出警告
 	} else {
-		p = *n;
-		*n = p->next;
+		p = *n;	// 将找到的结构体指针赋给 p
+		*n = p->next;	// 从链表中删除找到的结构体
 	}
-	mutex_unlock(&block_class_lock);
-	kfree(p);
+	mutex_unlock(&block_class_lock);	// 解锁
+	kfree(p);	// 释放之前找到的结构体占用的内存
 }
 
 EXPORT_SYMBOL(unregister_blkdev);
@@ -793,17 +842,24 @@ static int __init genhd_device_init(void)
 {
 	int error;
 
+	 // 设置块设备类的设备kobject为系统的块设备kobject
 	block_class.dev_kobj = sysfs_dev_block_kobj;
+	// 注册块设备类
 	error = class_register(&block_class);
+	// 检查类注册是否出错
 	if (unlikely(error))
-		return error;
+		return error;	// 如果出错，返回错误代码
+		// 初始化块设备的kobject映射，并设置探测函数和锁
 	bdev_map = kobj_map_init(base_probe, &block_class_lock);
-	blk_dev_init();
+	blk_dev_init();	// 初始化块设备层
 
+	// 注册一个块设备号，用于扩展块设备
 	register_blkdev(BLOCK_EXT_MAJOR, "blkext");
 
 #ifndef CONFIG_SYSFS_DEPRECATED
 	/* create top-level block dir */
+	/* 创建顶级块设备目录 */
+	// 在sysfs中创建一个顶级的“block”目录
 	block_depr = kobject_create_and_add("block", NULL);
 #endif
 	return 0;

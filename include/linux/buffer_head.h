@@ -310,14 +310,18 @@ static inline void put_bh(struct buffer_head *bh)
         atomic_dec(&bh->b_count);
 }
 
+// 释放一个缓冲区头，如果它不是空指针
 static inline void brelse(struct buffer_head *bh)
 {
+	// 释放一个缓冲区头，如果它不是空指针
 	if (bh)
 		__brelse(bh);
 }
 
+// 如果缓冲区头指针不为空
 static inline void bforget(struct buffer_head *bh)
 {
+	// 如果缓冲区头指针不为空
 	if (bh)
 		__bforget(bh);
 }

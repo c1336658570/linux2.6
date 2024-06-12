@@ -375,23 +375,33 @@ DEFINE_EVENT(block_get_rq, block_sleeprq,
  * to be sent to the device driver. Instead, accumulate requests in
  * the queue to improve throughput performance of the block device.
  */
+/**
+ * block_plug - 保持操作请求在请求队列中
+ * @q: 要插入的请求队列
+ *
+ * 插入请求队列 @q。不允许将块操作请求发送给设备驱动程序。相反，积累队列中的请求以提高块设备的吞吐性能。
+ */
 TRACE_EVENT(block_plug,
 
-	TP_PROTO(struct request_queue *q),
+	TP_PROTO(struct request_queue *q),	// 宏定义，指定事件的原型
 
-	TP_ARGS(q),
+	TP_ARGS(q),	// 宏定义，定义事件函数的参数
 
+	// 定义用于存储的结构体字段，存储任务名
 	TP_STRUCT__entry(
 		__array( char,		comm,	TASK_COMM_LEN	)
 	),
 
+	// 将当前任务的名称复制到entry结构的comm字段
 	TP_fast_assign(
 		memcpy(__entry->comm, current->comm, TASK_COMM_LEN);
 	),
 
+	// 定义事件的打印格式
 	TP_printk("[%s]", __entry->comm)
 );
 
+// 声明一个事件类
 DECLARE_EVENT_CLASS(block_unplug,
 
 	TP_PROTO(struct request_queue *q),
@@ -399,15 +409,20 @@ DECLARE_EVENT_CLASS(block_unplug,
 	TP_ARGS(q),
 
 	TP_STRUCT__entry(
+		// 记录请求队列中的请求数量
 		__field( int,		nr_rq			)
+		// 任务名
 		__array( char,		comm,	TASK_COMM_LEN	)
 	),
 
 	TP_fast_assign(
+		// 计算读写请求的总数
 		__entry->nr_rq	= q->rq.count[READ] + q->rq.count[WRITE];
+		// 复制当前任务的名称
 		memcpy(__entry->comm, current->comm, TASK_COMM_LEN);
 	),
 
+	// 定义打印格式
 	TP_printk("[%s] %d", __entry->comm, __entry->nr_rq)
 );
 
@@ -417,6 +432,12 @@ DECLARE_EVENT_CLASS(block_unplug,
  *
  * Unplug the request queue @q because a timer expired and allow block
  * operation requests to be sent to the device driver.
+ */
+/**
+ * block_unplug_timer - 定时释放请求队列中的操作请求到设备驱动程序
+ * @q: 要拔出的请求队列
+ *
+ * 由于定时器过期，拔出请求队列 @q 并允许块操作请求发送给设备驱动程序。
  */
 DEFINE_EVENT(block_unplug, block_unplug_timer,
 
@@ -431,6 +452,12 @@ DEFINE_EVENT(block_unplug, block_unplug_timer,
  *
  * Unplug request queue @q because device driver is scheduled to work
  * on elements in the request queue.
+ */
+/**
+ * block_unplug_io - 释放请求队列中的操作请求
+ * @q: 要拔出的请求队列
+ *
+ * 因为设备驱动程序计划处理请求队列中的元素，所以拔出请求队列 @q。
  */
 DEFINE_EVENT(block_unplug, block_unplug_io,
 

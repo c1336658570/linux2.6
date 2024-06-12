@@ -1082,50 +1082,88 @@ static void shrink_readahead_size_eio(struct file *filp,
  * This is really ugly. But the goto's actually try to clarify some
  * of the logic when it comes to error handling etc.
  */
+/**
+ * do_generic_file_read - 通用文件读取例程
+ * @filp:	要读取的文件
+ * @ppos:	当前文件位置
+ * @desc:	读取描述符
+ * @actor:	读取方法
+ *
+ * 这是所有可以直接使用页面缓存的文件系统的通用文件读取例程。
+ * 它使用 mapping->a_ops->readpage() 函数进行实际的底层操作。
+ *
+ * 这实际上很复杂。但是goto语句实际上是为了在错误处理等逻辑时提供清晰度。
+ */
 static void do_generic_file_read(struct file *filp, loff_t *ppos,
 		read_descriptor_t *desc, read_actor_t actor)
 {
+	// 获取文件映射
 	struct address_space *mapping = filp->f_mapping;
+	// 获取inode
 	struct inode *inode = mapping->host;
+	// 预读状态
 	struct file_ra_state *ra = &filp->f_ra;
+	// 页帧索引
 	pgoff_t index;
+	// 最后页帧索引
 	pgoff_t last_index;
+	// 上一个页帧索引
 	pgoff_t prev_index;
+	/* 页面内的偏移量 */
 	unsigned long offset;      /* offset into pagecache page */
+	// 上一个偏移量
 	unsigned int prev_offset;
-	int error;
+	int error;	// 错误码
 
+	// 计算当前偏移对应的页帧索引
 	index = *ppos >> PAGE_CACHE_SHIFT;
+	// 获取上一个位置的页帧索引
 	prev_index = ra->prev_pos >> PAGE_CACHE_SHIFT;
+	// 上一个偏移量
 	prev_offset = ra->prev_pos & (PAGE_CACHE_SIZE-1);
+	// 计算最后的页帧索引
 	last_index = (*ppos + desc->count + PAGE_CACHE_SIZE-1) >> PAGE_CACHE_SHIFT;
+	// 页面内的偏移量
 	offset = *ppos & ~PAGE_CACHE_MASK;
 
+	// 循环处理所有页帧
 	for (;;) {
+		// 页面指针
 		struct page *page;
+		// 文件结束的页帧索引
 		pgoff_t end_index;
+		// 文件大小
 		loff_t isize;
+		// 读取的字节数和返回值
 		unsigned long nr, ret;
 
-		cond_resched();
+		cond_resched();	// 让出CPU
 find_page:
+		// 查找并获取页面
 		page = find_get_page(mapping, index);
-		if (!page) {
+		if (!page) {	// 如果页面不存在
+			// 同步预读
 			page_cache_sync_readahead(mapping,
 					ra, filp,
 					index, last_index - index);
+			// 重新获取页面
 			page = find_get_page(mapping, index);
+			// 如果还是没有，处理无缓存页面
 			if (unlikely(page == NULL))
 				goto no_cached_page;
 		}
+		// 如果页面在读取中
 		if (PageReadahead(page)) {
+			// 异步预读
 			page_cache_async_readahead(mapping,
 					ra, filp, page,
 					index, last_index - index);
 		}
+		// 如果页面不是最新的
 		if (!PageUptodate(page)) {
 			if (inode->i_blkbits == PAGE_CACHE_SHIFT ||
 					!mapping->a_ops->is_partially_uptodate)
+				// 页面不是最新的，处理它
 				goto page_not_up_to_date;
 			if (!trylock_page(page))
 				goto page_not_up_to_date;
@@ -1144,28 +1182,42 @@ page_ok:
 		 * another truncate extends the file - this is desired though).
 		 */
 
+		// 以下代码检查文件大小后拷贝页面到用户空间
+		
+		// 读取文件大小
 		isize = i_size_read(inode);
+		// 计算结束的页帧索引
 		end_index = (isize - 1) >> PAGE_CACHE_SHIFT;
+		// 如果索引超过了文件大小
 		if (unlikely(!isize || index > end_index)) {
+			// 释放页面
 			page_cache_release(page);
-			goto out;
+			goto out;	// 退出
 		}
 
 		/* nr is the maximum number of bytes to copy from this page */
+		// 计算从这个页面可以复制的最大字节数
+		// 默认从整个页面复制
 		nr = PAGE_CACHE_SIZE;
+		// 如果是最后一页
 		if (index == end_index) {
+			// 计算剩余的字节数
 			nr = ((isize - 1) & ~PAGE_CACHE_MASK) + 1;
+			// 如果偏移超过了文件大小
 			if (nr <= offset) {
+				// 释放页面
 				page_cache_release(page);
+				// 退出
 				goto out;
 			}
 		}
-		nr = nr - offset;
+		nr = nr - offset;	// 调整读取的字节数
 
 		/* If users can be writing to this page using arbitrary
 		 * virtual addresses, take care about potential aliasing
 		 * before reading the page on the kernel side.
 		 */
+		// 如果映射可以写，确保页面在读取前是干净的
 		if (mapping_writably_mapped(mapping))
 			flush_dcache_page(page);
 
@@ -1173,9 +1225,10 @@ page_ok:
 		 * When a sequential read accesses a page several times,
 		 * only mark it as accessed the first time.
 		 */
+		// 如果是连续读取同一页面，只在第一次标记页面被访问
 		if (prev_index != index || offset != prev_offset)
 			mark_page_accessed(page);
-		prev_index = index;
+		prev_index = index;	// 更新上一个索引
 
 		/*
 		 * Ok, we have the page, and it's up-to-date, so
@@ -1187,106 +1240,135 @@ page_ok:
 		 * "pos" here (the actor routine has to update the user buffer
 		 * pointers and the remaining count).
 		 */
+		// 执行实际的读取操作
+		// 调用传入的actor函数进行读取
 		ret = actor(desc, page, offset, nr);
+		// 更新偏移
 		offset += ret;
+		// 更新索引
 		index += offset >> PAGE_CACHE_SHIFT;
+		// 更新偏移
 		offset &= ~PAGE_CACHE_MASK;
+		// 更新上一个偏移
 		prev_offset = offset;
 
-		page_cache_release(page);
-		if (ret == nr && desc->count)
+		page_cache_release(page);	// 释放页面
+		if (ret == nr && desc->count)	// 如果还有数据需要读取
 			continue;
-		goto out;
+		goto out;	// 否则退出
 
-page_not_up_to_date:
+page_not_up_to_date:	// 页面不是最新的，需要锁定并读取
 		/* Get exclusive access to the page ... */
+		// 获取对页面的独占访问
 		error = lock_page_killable(page);
 		if (unlikely(error))
-			goto readpage_error;
+			goto readpage_error;	// 错误处理
 
+// 页面已锁定但不是最新的
 page_not_up_to_date_locked:
 		/* Did it get truncated before we got the lock? */
+		// 检查页面是否在锁定前被截断
 		if (!page->mapping) {
-			unlock_page(page);
-			page_cache_release(page);
-			continue;
+			unlock_page(page);	// 解锁页面
+			page_cache_release(page);	// 释放页面
+			continue;	// 继续处理下一个页面
 		}
 
 		/* Did somebody else fill it already? */
+		// 检查其他人是否已经更新了页面
 		if (PageUptodate(page)) {
-			unlock_page(page);
-			goto page_ok;
+			unlock_page(page);	// 解锁页面
+			goto page_ok;	// 页面是最新的
 		}
 
-readpage:
+readpage:	// 读取页面
 		/* Start the actual read. The read will unlock the page. */
+		// 开始实际的读取，读取操作会解锁页面
+		// 调用readpage方法
 		error = mapping->a_ops->readpage(filp, page);
 
-		if (unlikely(error)) {
+		if (unlikely(error)) {	// 如果读取出错
 			if (error == AOP_TRUNCATED_PAGE) {
-				page_cache_release(page);
-				goto find_page;
+				page_cache_release(page);	// 释放页面
+				goto find_page;	// 重新查找页面
 			}
-			goto readpage_error;
+			goto readpage_error;	// 错误处理
 		}
 
-		if (!PageUptodate(page)) {
+		if (!PageUptodate(page)) {	// 如果页面仍然不是最新的
+		// 再次锁定页面
 			error = lock_page_killable(page);
 			if (unlikely(error))
+				// 错误处理
 				goto readpage_error;
+			// 检查页面是否已更新
 			if (!PageUptodate(page)) {
+				// 页面已被invalidate_mapping_pages处理
 				if (page->mapping == NULL) {
 					/*
 					 * invalidate_mapping_pages got it
 					 */
-					unlock_page(page);
-					page_cache_release(page);
-					goto find_page;
+					unlock_page(page);	// 解锁页面
+					page_cache_release(page);	// 释放页面
+					goto find_page;	// 重新查找页面
 				}
-				unlock_page(page);
+				unlock_page(page);	// 解锁页面
+				// 调整预读大小
 				shrink_readahead_size_eio(filp, ra);
+				// 设置错误码为I/O错误
 				error = -EIO;
-				goto readpage_error;
+				goto readpage_error;	// 错误处理
 			}
-			unlock_page(page);
+			unlock_page(page);	// 解锁页面
 		}
 
-		goto page_ok;
+		goto page_ok;	// 页面已更新，继续处理
 
-readpage_error:
+readpage_error:	// 读取页面出错
 		/* UHHUH! A synchronous read error occurred. Report it */
-		desc->error = error;
-		page_cache_release(page);
-		goto out;
+		// 报告同步读取错误
+		desc->error = error;	// 设置读取描述符的错误码
+		page_cache_release(page);	// 释放页面
+		goto out;	// 退出处理
 
-no_cached_page:
+no_cached_page:	// 未缓存页面处理
 		/*
 		 * Ok, it wasn't cached, so we need to create a new
 		 * page..
 		 */
-		page = page_cache_alloc_cold(mapping);
-		if (!page) {
+		// 页面未缓存，需要创建新页面
+		page = page_cache_alloc_cold(mapping);	// 分配新页面
+		if (!page) {	// 如果页面分配失败
+		// 设置错误为内存不足
 			desc->error = -ENOMEM;
-			goto out;
+			goto out;	// 退出处理
 		}
+		// 将页面添加到页面缓存
 		error = add_to_page_cache_lru(page, mapping,
 						index, GFP_KERNEL);
-		if (error) {
+		if (error) {	// 如果添加失败
+		// 释放页面
 			page_cache_release(page);
+			// 如果是因为页面已存在，则重新查找
 			if (error == -EEXIST)
 				goto find_page;
-			desc->error = error;
-			goto out;
+			desc->error = error;	// 设置错误码
+			goto out;	// 退出处理
 		}
-		goto readpage;
+		goto readpage;	// 读取页面
 	}
 
-out:
+out:	// 退出处理
+	// 更新预读状态的上一个位置
 	ra->prev_pos = prev_index;
+	// 转换为字节偏移
 	ra->prev_pos <<= PAGE_CACHE_SHIFT;
+	// 加上偏移量
 	ra->prev_pos |= prev_offset;
 
+	// 更新文件位置
 	*ppos = ((loff_t)index << PAGE_CACHE_SHIFT) + offset;
+	// 标记文件为已访问
 	file_accessed(filp);
 }
 
@@ -1377,60 +1459,88 @@ EXPORT_SYMBOL(generic_segment_checks);
  * This is the "read()" routine for all filesystems
  * that can use the page cache directly.
  */
+/**
+ * 通用文件异步读取 - 所有可以直接使用页面缓存的文件系统的通用文件读取函数
+ * @iocb:	内核I/O控制块
+ * @iov:	I/O向量请求
+ * @nr_segs:	iovec中的段数
+ * @pos:	当前文件位置
+ *
+ * 这是所有可以直接使用页面缓存的文件系统的"read()"函数。
+ */
+// 通用文件异步读取函数
 ssize_t
 generic_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 		unsigned long nr_segs, loff_t pos)
 {
+	// 获取文件结构体
 	struct file *filp = iocb->ki_filp;
-	ssize_t retval;
-	unsigned long seg;
-	size_t count;
+	ssize_t retval;	// 用于存放返回值
+	unsigned long seg;	// 用于循环的索引
+	size_t count;		// 总读取字节数
+	// 当前文件位置的指针
 	loff_t *ppos = &iocb->ki_pos;
 
-	count = 0;
+	count = 0;	// 当前文件位置的指针
+	// 检查和准备iovec结构体
 	retval = generic_segment_checks(iov, &nr_segs, &count, VERIFY_WRITE);
+	// 如果检查出错，返回错误
 	if (retval)
 		return retval;
 
 	/* coalesce the iovecs and go direct-to-BIO for O_DIRECT */
+	/* 如果是O_DIRECT标志，直接通过BIO进行读取 */
 	if (filp->f_flags & O_DIRECT) {
 		loff_t size;
 		struct address_space *mapping;
 		struct inode *inode;
 
+		// 获取地址空间结构体
 		mapping = filp->f_mapping;
+		// 获取inode结构体
 		inode = mapping->host;
+		// 如果没有数据需要读取，则直接退出
 		if (!count)
 			goto out; /* skip atime */
+		// 读取文件大小
 		size = i_size_read(inode);
+		// 如果当前位置小于文件大小
 		if (pos < size) {
 			retval = filemap_write_and_wait_range(mapping, pos,
 					pos + iov_length(iov, nr_segs) - 1);
+			// 如果没有错误
 			if (!retval) {
+					// 执行直接IO操作
 				retval = mapping->a_ops->direct_IO(READ, iocb,
 							iov, pos, nr_segs);
 			}
 			if (retval > 0)
+				// 更新位置
 				*ppos = pos + retval;
 			if (retval) {
+				// 更新文件访问时间
 				file_accessed(filp);
 				goto out;
 			}
 		}
 	}
 
+	// 循环处理每个iovec
 	for (seg = 0; seg < nr_segs; seg++) {
 		read_descriptor_t desc;
 
 		desc.written = 0;
 		desc.arg.buf = iov[seg].iov_base;
 		desc.count = iov[seg].iov_len;
+		// 如果当前段没有数据，则继续下一段
 		if (desc.count == 0)
 			continue;
 		desc.error = 0;
+		// 执行通用文件读取
 		do_generic_file_read(filp, ppos, &desc, file_read_actor);
-		retval += desc.written;
-		if (desc.error) {
+		retval += desc.written;	// 累加写入的字节数
+		if (desc.error) {	// 如果有错误
+			// 使用错误码作为返回值
 			retval = retval ?: desc.error;
 			break;
 		}
@@ -1438,7 +1548,7 @@ generic_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 			break;
 	}
 out:
-	return retval;
+	return retval;	// 返回读取结果
 }
 EXPORT_SYMBOL(generic_file_aio_read);
 

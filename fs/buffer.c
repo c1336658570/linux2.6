@@ -1268,12 +1268,21 @@ EXPORT_SYMBOL(mark_buffer_dirty);
  * in preparation for freeing it (sometimes, rarely, buffers are removed from
  * a page but it ends up not being freed, and buffers may later be reattached).
  */
+/*
+ * 递减缓冲区头（buffer_head）的引用计数。如果页面上的所有缓冲区头的引用计数都为零，
+ * 并且都是干净且未锁定的，而且如果页面本身也是干净且未锁定的，
+ * 则 try_to_free_buffers() 可能会在准备释放页面前从页面中移除缓冲区头
+ * （有时，虽然很少见，缓冲区头可能会从页面中移除，但页面最终没有被释放，
+ * 并且缓冲区头可能稍后会重新附加）。
+ */
 void __brelse(struct buffer_head * buf)
 {
+	// 如果缓冲区头的引用计数非零
 	if (atomic_read(&buf->b_count)) {
-		put_bh(buf);
+		put_bh(buf);	// 减少缓冲区头的引用计数
 		return;
 	}
+	// 如果尝试释放一个已经是自由的缓冲区头，输出警告信息
 	WARN(1, KERN_ERR "VFS: brelse: Trying to free free buffer\n");
 }
 EXPORT_SYMBOL(__brelse);
@@ -1282,18 +1291,27 @@ EXPORT_SYMBOL(__brelse);
  * bforget() is like brelse(), except it discards any
  * potentially dirty data.
  */
+/*
+ * bforget() 类似于 brelise()，但它会丢弃任何可能是脏的数据。
+ */
 void __bforget(struct buffer_head *bh)
 {
+	// 清除缓冲区头的脏标记
 	clear_buffer_dirty(bh);
+	// 如果缓冲区头关联了映射
 	if (bh->b_assoc_map) {
 		struct address_space *buffer_mapping = bh->b_page->mapping;
 
+		// 获取锁
 		spin_lock(&buffer_mapping->private_lock);
+		// 从关联列表中移除缓冲区头
 		list_del_init(&bh->b_assoc_buffers);
+		// 清除关联映射
 		bh->b_assoc_map = NULL;
+		// 释放锁
 		spin_unlock(&buffer_mapping->private_lock);
 	}
-	__brelse(bh);
+	__brelse(bh);	// 最后调用__brelse释放缓冲区头
 }
 EXPORT_SYMBOL(__bforget);
 
@@ -3649,26 +3667,36 @@ void free_buffer_head(struct buffer_head *bh)
 }
 EXPORT_SYMBOL(free_buffer_head);
 
+// 当CPU退出时释放其所有的缓冲区头并清理相关的计数器
 static void buffer_exit_cpu(int cpu)
 {
 	int i;
+	// 获取当前CPU
 	struct bh_lru *b = &per_cpu(bh_lrus, cpu);
 
+	// 获取当前CPU
 	for (i = 0; i < BH_LRU_SIZE; i++) {
+		// 释放缓冲区头，减少其引用计数
 		brelse(b->bhs[i]);
+		 // 将指针设置为NULL，避免悬挂引用
 		b->bhs[i] = NULL;
 	}
+	// 将当前CPU的缓冲区头计数合并到全局计数中
 	get_cpu_var(bh_accounting).nr += per_cpu(bh_accounting, cpu).nr;
+	// 清零当前CPU的缓冲区头计数
 	per_cpu(bh_accounting, cpu).nr = 0;
-	put_cpu_var(bh_accounting);
+	put_cpu_var(bh_accounting);	// 释放对变量的引用
 }
 
+// CPU状态改变时的通知处理函数，用于处理CPU的退出
 static int buffer_cpu_notify(struct notifier_block *self,
 			      unsigned long action, void *hcpu)
 {
+	// 如果CPU已经停止或冻结
 	if (action == CPU_DEAD || action == CPU_DEAD_FROZEN)
+	 	// 调用清理函数释放该CPU的资源
 		buffer_exit_cpu((unsigned long)hcpu);
-	return NOTIFY_OK;
+	return NOTIFY_OK;	// 返回通知已处理的状态码
 }
 
 /**
@@ -3696,29 +3724,45 @@ EXPORT_SYMBOL(bh_uptodate_or_lock);
  *
  * Returns zero on success and -EIO on error.
  */
+/**
+ * bh_submit_read - 提交一个锁定的缓冲区进行读取
+ * @bh: struct buffer_head
+ *
+ * 如果成功，返回0；如果出现错误，返回 -EIO。
+ */
 int bh_submit_read(struct buffer_head *bh)
 {
+	// 确保缓冲区已锁定，如果未锁定则触发BUG
 	BUG_ON(!buffer_locked(bh));
 
+	// 如果缓冲区已更新
 	if (buffer_uptodate(bh)) {
-		unlock_buffer(bh);
-		return 0;
+		unlock_buffer(bh);	// 解锁缓冲区
+		return 0;	// 返回成功
 	}
 
-	get_bh(bh);
+	get_bh(bh);	// 增加缓冲区的引用计数
+	// 设置读取完成后的回调函数
 	bh->b_end_io = end_buffer_read_sync;
+	// 提交缓冲区进行读取
 	submit_bh(READ, bh);
+	// 等待缓冲区的IO操作完成
 	wait_on_buffer(bh);
+	// 再次检查缓冲区是否已更新
 	if (buffer_uptodate(bh))
-		return 0;
-	return -EIO;
+		return 0;	// 返回成功
+	return -EIO;	// 如果缓冲区未成功更新，返回I/O错误
 }
 EXPORT_SYMBOL(bh_submit_read);
 
+/**
+ * buffer_init - 初始化缓冲区系统
+ */
 void __init buffer_init(void)
 {
 	int nrpages;
 
+	// 创建缓冲区头的内存缓
 	bh_cachep = kmem_cache_create("buffer_head",
 			sizeof(struct buffer_head), 0,
 				(SLAB_RECLAIM_ACCOUNT|SLAB_PANIC|
@@ -3728,7 +3772,13 @@ void __init buffer_init(void)
 	/*
 	 * Limit the bh occupancy to 10% of ZONE_NORMAL
 	 */
+	/*
+ 	 * 将缓冲区头的最大数限制在ZONE_NORMAL的10%
+ 	 */
+	// 计算可用页数的10%
 	nrpages = (nr_free_buffer_pages() * 10) / 100;
+	// 根据每页可以容纳的缓冲区头数量计算最大缓冲区头数
 	max_buffer_heads = nrpages * (PAGE_SIZE / sizeof(struct buffer_head));
+	// 注册CPU热插拔通知函数，以便在CPU状态改变时作出响应
 	hotcpu_notifier(buffer_cpu_notify, 0);
 }

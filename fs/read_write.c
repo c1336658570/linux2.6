@@ -210,67 +210,89 @@ bad:
  * them to something that fits in "int" so that others
  * won't have to do range checks all the time.
  */
+// rw_verify_area 不喜欢过大的 count 值。我们限制它们在一个符合 int 类型的范围内，
+// 这样其他函数就不需要一直进行范围检查。
 #define MAX_RW_COUNT (INT_MAX & PAGE_CACHE_MASK)
 
 int rw_verify_area(int read_write, struct file *file, loff_t *ppos, size_t count)
 {
 	struct inode *inode;
 	loff_t pos;
-	int retval = -EINVAL;
+	int retval = -EINVAL;	// 初始设定返回值为无效参数
 
+	// 获取 inode 结构体
 	inode = file->f_path.dentry->d_inode;
+	// 如果 count 为负，直接返回错误
 	if (unlikely((ssize_t) count < 0))
 		return retval;
 	pos = *ppos;
+	// 检查位置是否有效（不小于0，且加上 count 后不溢出）
 	if (unlikely((pos < 0) || (loff_t) (pos + count) < 0))
 		return retval;
 
+	// 如果 inode 上存在强制锁，并且该锁被激活
 	if (unlikely(inode->i_flock && mandatory_lock(inode))) {
 		retval = locks_mandatory_area(
 			read_write == READ ? FLOCK_VERIFY_READ : FLOCK_VERIFY_WRITE,
 			inode, file, pos, count);
+		// 如果锁定检查出错，返回错误
 		if (retval < 0)
 			return retval;
 	}
+	// 检查文件访问权限
 	retval = security_file_permission(file,
 				read_write == READ ? MAY_READ : MAY_WRITE);
+	// 如果权限检查失败，返回错误
 	if (retval)
 		return retval;
+	// 如果 count 大于 MAX_RW_COUNT，则返回 MAX_RW_COUNT，否则返回 count
 	return count > MAX_RW_COUNT ? MAX_RW_COUNT : count;
 }
 
+// 在同步 I/O 控制块上等待，直到可以重试读操作
 static void wait_on_retry_sync_kiocb(struct kiocb *iocb)
 {
+	// 设置当前任务状态为不可中断
 	set_current_state(TASK_UNINTERRUPTIBLE);
+	// 检查 I/O 控制块是否被标记为需要重试
 	if (!kiocbIsKicked(iocb))
-		schedule();
+		schedule();	// 如果没有被标记，则挂起当前任务，等待被唤醒
 	else
-		kiocbClearKicked(iocb);
+		kiocbClearKicked(iocb);	// 如果被标记了，清除标记
+		// 恢复任务状态为运行中
 	__set_current_state(TASK_RUNNING);
 }
 
 ssize_t do_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
+	// 初始化读取数据的向量
 	struct iovec iov = { .iov_base = buf, .iov_len = len };
-	struct kiocb kiocb;
+	struct kiocb kiocb;	// 定义一个同步 I/O 控制块
 	ssize_t ret;
 
+	// 初始化 I/O 控制块
 	init_sync_kiocb(&kiocb, filp);
-	kiocb.ki_pos = *ppos;
-	kiocb.ki_left = len;
-	kiocb.ki_nbytes = len;
+	kiocb.ki_pos = *ppos;	// 设置起始读取位置
+	kiocb.ki_left = len;	// 设置剩余要读取的字节数
+	kiocb.ki_nbytes = len;	// 设置总共要读取的字节数
 
 	for (;;) {
+		// 尝试进行异步 I/O 读取
 		ret = filp->f_op->aio_read(&kiocb, &iov, 1, kiocb.ki_pos);
+		// 如果不需要重试，则跳出循环
 		if (ret != -EIOCBRETRY)
 			break;
+		// 如果需要重试，则等待
 		wait_on_retry_sync_kiocb(&kiocb);
 	}
 
+	// 如果 I/O 被队列化了
 	if (-EIOCBQUEUED == ret)
+		// 等待 I/O 完成
 		ret = wait_on_sync_kiocb(&kiocb);
+	// 更新文件位置
 	*ppos = kiocb.ki_pos;
-	return ret;
+	return ret;	// 返回读取结果
 }
 
 EXPORT_SYMBOL(do_sync_read);
@@ -279,28 +301,35 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
 
+	// 检查文件是否允许读取
 	if (!(file->f_mode & FMODE_READ))
-		return -EBADF;
+		return -EBADF;	// 如果文件不允许读取，返回错误
+	// 检查文件操作指针是否存在，以及对应的读函数是否存在
 	if (!file->f_op || (!file->f_op->read && !file->f_op->aio_read))
 		return -EINVAL;
+	// 检查用户空间的缓冲区是否可以写入
 	if (unlikely(!access_ok(VERIFY_WRITE, buf, count)))
 		return -EFAULT;
 
+	// 检查读取操作是否会超出文件大小或者存在其他问题
 	ret = rw_verify_area(READ, file, pos, count);
-	if (ret >= 0) {
-		count = ret;
+	if (ret >= 0) {	// 如果没有问题
+		count = ret;	// 更新读取字节数
+		// 如果定义了直接读取函数，使用之
 		if (file->f_op->read)
 			ret = file->f_op->read(file, buf, count, pos);
-		else
+		else	// 如果没有定义，使用同步读取函数
 			ret = do_sync_read(file, buf, count, pos);
-		if (ret > 0) {
+		if (ret > 0) {	// 如果读取成功
+			// 通知文件被访问
 			fsnotify_access(file->f_path.dentry);
+			// 增加当前进程的读取计数
 			add_rchar(current, ret);
 		}
-		inc_syscr(current);
+		inc_syscr(current);	// 增加系统读取调用计数
 	}
 
-	return ret;
+	return ret;	// 返回读取的字节数或错误码
 }
 
 EXPORT_SYMBOL(vfs_read);

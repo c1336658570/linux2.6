@@ -276,11 +276,25 @@ void __generic_unplug_device(struct request_queue *q)
  *   gets unplugged, the request_fn defined for the queue is invoked and
  *   transfers started.
  **/
+/**
+ * generic_unplug_device - 触发一个请求队列
+ * @q:    被操作的 &struct request_queue
+ *
+ * 描述:
+ *   Linux使用插拔机制来构建更大的请求队列，然后再让设备处理这些请求。
+ *   如果队列被插上（plugged），I/O 调度器仍在队列上添加和合并请求。
+ *   一旦队列被拔掉（unplugged），为队列定义的 request_fn 就会被调用，
+ *   开始传输数据。
+ **/
 void generic_unplug_device(struct request_queue *q)
 {
+	// 检查队列是否被插上
 	if (blk_queue_plugged(q)) {
+		// 对队列上锁
 		spin_lock_irq(q->queue_lock);
+		// 调用内部函数进行真正的拔掉操作
 		__generic_unplug_device(q);
+		// 解锁队列
 		spin_unlock_irq(q->queue_lock);
 	}
 }
@@ -289,25 +303,32 @@ EXPORT_SYMBOL(generic_unplug_device);
 static void blk_backing_dev_unplug(struct backing_dev_info *bdi,
 				   struct page *page)
 {
+	// 从bdi结构体中取出请求队列
 	struct request_queue *q = bdi->unplug_io_data;
 
+	// 调用blk_unplug函数进行拔掉操作
 	blk_unplug(q);
 }
 
 void blk_unplug_work(struct work_struct *work)
 {
+	// 从work结构体中获取请求队列
 	struct request_queue *q =
 		container_of(work, struct request_queue, unplug_work);
 
+	// 跟踪拔掉操作
 	trace_block_unplug_io(q);
-	q->unplug_fn(q);
+	q->unplug_fn(q);	// 调用队列的拔掉函数
 }
 
 void blk_unplug_timeout(unsigned long data)
 {
+	// 从data中获取请求队列
 	struct request_queue *q = (struct request_queue *)data;
 
+	// 跟踪拔掉定时器
 	trace_block_unplug_timer(q);
+	// 调度拔掉工作
 	kblockd_schedule_work(q, &q->unplug_work);
 }
 
@@ -316,8 +337,13 @@ void blk_unplug(struct request_queue *q)
 	/*
 	 * devices don't necessarily have an ->unplug_fn defined
 	 */
-	if (q->unplug_fn) {
+	/*
+	 * 设备不一定定义了 ->unplug_fn
+	 */
+	if (q->unplug_fn) {	// 如果定义了拔掉函数
+	// 跟踪拔掉操作
 		trace_block_unplug_io(q);
+		// 调用拔掉函数
 		q->unplug_fn(q);
 	}
 }
@@ -486,40 +512,62 @@ struct request_queue *blk_alloc_queue(gfp_t gfp_mask)
 }
 EXPORT_SYMBOL(blk_alloc_queue);
 
+/**
+ * 在内核中创建和初始化一个块设备的请求队列。请求队列是块设备驱动中用于管理I/O
+ * 请求的核心数据结构。函数首先在指定的NUMA节点上分配一个request_queue结构体，
+ * 并初始化它的各个字段，包括后备设备信息、超时处理和阻塞处理机制。
+ * 此外，函数还初始化了与请求队列相关的内核对象和同步机制。
+ * 如果初始化过程中出现错误，函数会清理已分配的资源并返回NULL。
+ */
 struct request_queue *blk_alloc_queue_node(gfp_t gfp_mask, int node_id)
 {
-	struct request_queue *q;
-	int err;
+	struct request_queue *q;	// 声明一个指向请求队列的指针
+	int err;		// 用于存储错误代码
 
+	// 在指定的内存节点上分配一个请求队列结构体，并初始化为零
 	q = kmem_cache_alloc_node(blk_requestq_cachep,
 				gfp_mask | __GFP_ZERO, node_id);
-	if (!q)
-		return NULL;
+	if (!q)	// 检查分配是否成功
+		return NULL;	// 如果分配失败，返回NULL
 
+	// 初始化请求队列的后备设备信息结构
+	// 设置解除阻塞的函数
 	q->backing_dev_info.unplug_io_fn = blk_backing_dev_unplug;
-	q->backing_dev_info.unplug_io_data = q;
+	q->backing_dev_info.unplug_io_data = q;	// 设置解除阻塞的数据指针
+	// 设置最大预读页面数
 	q->backing_dev_info.ra_pages =
 			(VM_MAX_READAHEAD * 1024) / PAGE_CACHE_SIZE;
 	q->backing_dev_info.state = 0;
 	q->backing_dev_info.capabilities = BDI_CAP_MAP_COPY;
+	// 设置设备信息的名称
 	q->backing_dev_info.name = "block";
 
+	// 初始化后备设备信息结构
 	err = bdi_init(&q->backing_dev_info);
-	if (err) {
+	if (err) {	// 检查初始化是否成功
+	// 如果失败，释放之前分配的内存
 		kmem_cache_free(blk_requestq_cachep, q);
-		return NULL;
+		return NULL;  // 并返回NULL
 	}
 
-	init_timer(&q->unplug_timer);
+	// 初始化和设置请求队列的定时器和工作项
+	init_timer(&q->unplug_timer);	// 初始化解除阻塞的定时器
+	// 设置超时定时器
 	setup_timer(&q->timeout, blk_rq_timed_out_timer, (unsigned long) q);
+	// 初始化超时列表
 	INIT_LIST_HEAD(&q->timeout_list);
+	// 初始化解除阻塞工作项
 	INIT_WORK(&q->unplug_work, blk_unplug_work);
 
+	// 初始化请求队列的内核对象
 	kobject_init(&q->kobj, &blk_queue_ktype);
 
+	// 初始化请求队列用于系统文件系统的锁
 	mutex_init(&q->sysfs_lock);
+	// 初始化请求队列的自旋锁
 	spin_lock_init(&q->__queue_lock);
 
+	// 返回初始化的请求队列
 	return q;
 }
 EXPORT_SYMBOL(blk_alloc_queue_node);
@@ -2568,19 +2616,23 @@ EXPORT_SYMBOL(kblockd_schedule_work);
 
 int __init blk_dev_init(void)
 {
+	// 使用 BUILD_BUG_ON 确保 __REQ_NR_BITS 不超出 struct request 中 cmd_flags 的位数。
 	BUILD_BUG_ON(__REQ_NR_BITS > 8 *
 			sizeof(((struct request *)0)->cmd_flags));
 
+	// 使用 BUILD_BUG_ON 确保 __REQ_NR_BITS 不超出 struct request 中 cmd_flags 的位数。
 	kblockd_workqueue = create_workqueue("kblockd");
+	// 如果创建失败，则内核崩溃。
 	if (!kblockd_workqueue)
 		panic("Failed to create kblockd\n");
 
+	// 创建一个内存缓存池，用于快速分配和释放 request 结构。
 	request_cachep = kmem_cache_create("blkdev_requests",
 			sizeof(struct request), 0, SLAB_PANIC, NULL);
 
+	// 创建一个内存缓存池，用于快速分配和释放 request_queue 结构。
 	blk_requestq_cachep = kmem_cache_create("blkdev_queue",
 			sizeof(struct request_queue), 0, SLAB_PANIC, NULL);
 
-	return 0;
+	return 0;	// 初始化成功返回0。
 }
-

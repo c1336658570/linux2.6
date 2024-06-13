@@ -1097,6 +1097,22 @@ static void shrink_readahead_size_eio(struct file *filp,
 static void do_generic_file_read(struct file *filp, loff_t *ppos,
 		read_descriptor_t *desc, read_actor_t actor)
 {
+	/**
+	 * // 在页高速缓存找需要的数据
+	 * page = find_get_page(mapping, index)
+	 * // 如果要找的页没在页高速缓存，find_get_page返回NULL。内核需要分配一个新页面，并
+	 * // 将其加入到页高速缓存中
+	 * page = page_cache_alloc_cold(mapping);
+	 * if (!page) {
+	 * // 内存分配出错
+	 * }
+	 * // 然后将其加入到页面调整缓存
+	 * error = add_to_page_cache_lru(page, mapping, index, GFP_KERNEL);
+	 * if (error) {
+	 * // 页面被加入到高速缓存时出错
+	 * }
+	 */
+
 	// 获取文件映射
 	struct address_space *mapping = filp->f_mapping;
 	// 获取inode
@@ -1372,12 +1388,17 @@ out:	// 退出处理
 	file_accessed(filp);
 }
 
+// 从内核映射的页面到用户空间的数据复制操作，首先尝试使用原子操作进行快速复制，
+// 如果失败则采用普通映射方式。通过调整缓冲区大小和处理缺页异常，
+// 确保数据安全有效地从内核传输到用户程序。
 int file_read_actor(read_descriptor_t *desc, struct page *page,
 			unsigned long offset, unsigned long size)
 {
-	char *kaddr;
+	char *kaddr;	// 内核临时映射的地址
+	// `left` 用于记录未复制的字节数
 	unsigned long left, count = desc->count;
 
+	// 调整 size 确保不会超过读描述符所要求的字节数
 	if (size > count)
 		size = count;
 
@@ -1385,28 +1406,43 @@ int file_read_actor(read_descriptor_t *desc, struct page *page,
 	 * Faults on the destination of a read are common, so do it before
 	 * taking the kmap.
 	 */
+	/*
+	 * 读操作目标页的缺页异常是常见的，所以在执行 kmap 之前先处理。
+	 * 如果目标页写入时没有发生缺页异常，即先处理可能的用户空间页错误。
+	 */
 	if (!fault_in_pages_writeable(desc->arg.buf, size)) {
+		// 使用原子操作映射页，KM_USER0 是类型，用于标记临时映射的用途
 		kaddr = kmap_atomic(page, KM_USER0);
+		// 尝试原子地将数据从内核空间复制到用户空间
 		left = __copy_to_user_inatomic(desc->arg.buf,
 						kaddr + offset, size);
+		// 原子解除映射
 		kunmap_atomic(kaddr, KM_USER0);
+		// 如果全部复制成功，跳转到成功处理
 		if (left == 0)
 			goto success;
 	}
 
 	/* Do it the slow way */
-	kaddr = kmap(page);
+	/* 慢速路径 */
+	kaddr = kmap(page);	// 非原子地映射页
+	// 将数据从内核复制到用户空间
 	left = __copy_to_user(desc->arg.buf, kaddr + offset, size);
-	kunmap(page);
+	kunmap(page);	// 解除映射
 
-	if (left) {
-		size -= left;
+	if (left) {	// 如果还有未复制的数据
+		size -= left;	// 调整成功复制的大小
+		// 设置错误码
 		desc->error = -EFAULT;
 	}
 success:
+	// 更新描述符状态
 	desc->count = count - size;
+	// 更新剩余要读的字节数
 	desc->written += size;
+	// 移动缓冲区指针
 	desc->arg.buf += size;
+	// 返回这次操作复制的字节数
 	return size;
 }
 

@@ -496,14 +496,34 @@ struct iattr {
  * page to allow for functions that return the number of bytes operated on in a
  * given page.
  */
+/**
+ * enum positive_aop_returns - 有特定语义的aop返回码
+ *
+ * @AOP_WRITEPAGE_ACTIVATE: 告知调用者页面写回已完成，页面仍然锁定，并且应被视为活跃的。
+ *                          VM使用这一提示将页面返回到活跃列表——它在不久的将来不会再成为写回的候选。
+ *                          其他调用者在收到此返回时必须小心解锁页面。由writepage()返回；
+ *
+ * @AOP_TRUNCATED_PAGE: 被传递了一个锁定页面的AOP方法已经解锁了该页面，并且页面可能已被截断。
+ *                      调用者应该返回到获取新页面并重试。aop将采取合理的预防措施以避免活锁。
+ *                      如果调用者持有页面引用，在重试前应放弃它。由readpage()返回。
+ *
+ * address_space_operation函数返回这些大的常数来向调用者表明特殊的语义。这些常数远大于页面中的字节数，
+ * 以允许函数返回在给定页面中操作的字节数。
+ */
 
 enum positive_aop_returns {
-	AOP_WRITEPAGE_ACTIVATE	= 0x80000,
-	AOP_TRUNCATED_PAGE	= 0x80001,
+	AOP_WRITEPAGE_ACTIVATE	= 0x80000,	 	// 写页面激活
+	AOP_TRUNCATED_PAGE	= 0x80001,				// 页面被截断
 };
 
+/* 将不执行短写 */
 #define AOP_FLAG_UNINTERRUPTIBLE	0x0001 /* will not do a short write */
+/* 从cont_expand调用 */
 #define AOP_FLAG_CONT_EXPAND		0x0002 /* called from cont_expand */
+/* 用于文件系统指示
+ * 辅助代码（例如缓冲层）
+ * 从分配中清除GFP_FS
+ */
 #define AOP_FLAG_NOFS			0x0004 /* used by filesystem to direct
 						* helper code (eg buffer layer)
 						* to clear GFP_FS from alloc */
@@ -516,34 +536,49 @@ struct address_space;
 struct writeback_control;
 
 struct iov_iter {
+	// 指向iovec结构数组的指针
 	const struct iovec *iov;
+	// iovec结构的数量
 	unsigned long nr_segs;
+	// 当前 iovec 已经使用的偏移量
 	size_t iov_offset;
+	// 还剩多少字节需要处理
 	size_t count;
 };
 
+// 从用户空间原子地复制数据到指定页
 size_t iov_iter_copy_from_user_atomic(struct page *page,
 		struct iov_iter *i, unsigned long offset, size_t bytes);
+// 从用户空间复制数据到指定页
 size_t iov_iter_copy_from_user(struct page *page,
 		struct iov_iter *i, unsigned long offset, size_t bytes);
+// 推进iov_iter指定的字节数
 void iov_iter_advance(struct iov_iter *i, size_t bytes);
+// 确保iov_iter指定的区域在内存中可读，可能导致缺页错误
 int iov_iter_fault_in_readable(struct iov_iter *i, size_t bytes);
+// 返回当前iov_iter的单个段的剩余字节数
 size_t iov_iter_single_seg_count(struct iov_iter *i);
 
 static inline void iov_iter_init(struct iov_iter *i,
 			const struct iovec *iov, unsigned long nr_segs,
 			size_t count, size_t written)
 {
+	// 初始化iovec指针
 	i->iov = iov;
+	// 初始化段数
 	i->nr_segs = nr_segs;
+	// 从第一个段的开始处开始处理
 	i->iov_offset = 0;
+	// 设置总共需要处理的字节数
 	i->count = count + written;
 
+	// 根据已经写入的字节数推进
 	iov_iter_advance(i, written);
 }
 
 static inline size_t iov_iter_count(struct iov_iter *i)
 {
+	// 返回iov_iter中剩余的字节数
 	return i->count;
 }
 
@@ -556,14 +591,23 @@ static inline size_t iov_iter_count(struct iov_iter *i)
  * The simplest case just copies the data to user
  * mode.
  */
+/*
+ * “描述符”，用于跟踪我们在读取操作中的状态。
+ * 这允许我们使用相同的读取代码，但可以有多种不同的数据使用方式，
+ * 这些数据是从文件中读取的。
+ *
+ * 最简单的情况就是将数据复制到用户空间。
+ */
 typedef struct {
-	size_t written;
-	size_t count;
+	size_t written;	// 已写入的数据量
+	size_t count;		// 总计需要读取的数据量
 	union {
-		char __user *buf;
-		void *data;
-	} arg;
+		char __user *buf;	// 用户空间的缓冲区指针
+		void *data;				// 用于其他目的的泛型数据指针
+	} arg;	// 参数，可以是用户空间的缓冲区或其他数据
+	// 错误码，如果读取过程中发生错误则设置
 	int error;
+	// 结构体名称为 read_descriptor_t
 } read_descriptor_t;
 
 typedef int (*read_actor_t)(read_descriptor_t *, struct page *,
@@ -985,37 +1029,64 @@ static inline unsigned imajor(const struct inode *inode)
 extern struct block_device *I_BDEV(struct inode *inode);
 
 struct fown_struct {
+	/* 保护 pid, uid, euid 字段的读写锁 */
+	// 保护 `pid`, `uid`, `euid` 字段的读写锁，确保它们的并发访问安全
 	rwlock_t lock;          /* protects pid, uid, euid fields */
+	/* 应该发送 SIGIO 的 pid 或 -pgrp */
+	// 表示应该发送 SIGIO 信号的进程 ID 或进程组 ID
 	struct pid *pid;	/* pid or -pgrp where SIGIO should be sent */
+	/* 发送 SIGIO 的进程组类型 */
+	// 表示发送 SIGIO 信号的进程组类型
 	enum pid_type pid_type;	/* Kind of process group SIGIO should be sent to */
+	 /* 设置所有者的进程的 uid/euid */
+	 // 表示设置所有者的进程的用户 ID 和有效用户 ID
 	uid_t uid, euid;	/* uid/euid of process setting the owner */
+	/* 要在 IO 上发送的 posix.1b 实时信号 */
+	// 表示在 IO 上发送的 posix.1b 实时信号编号
 	int signum;		/* posix.1b rt signal to be delivered on IO */
 };
 
 /*
  * Track a single file's readahead state
  */
+/*
+ * 跟踪单个文件的预读状态
+ */
 struct file_ra_state {
+	/* 预读开始的位置 */
 	pgoff_t start;			/* where readahead started */
+	/* 预读页数 */
 	unsigned int size;		/* # of readahead pages */
+	/* 当只剩下 # 个页时进行异步预读 */
+	// 表示当预读窗口中只剩下指定页数时进行异步预读
 	unsigned int async_size;	/* do asynchronous readahead when
 					   there are only # of pages ahead */
 
+	/* 最大预读窗口 */
+	// 表示最大预读窗口大小
 	unsigned int ra_pages;		/* Maximum readahead window */
+	/* mmap 访问的缓存未命中统计 */
 	unsigned int mmap_miss;		/* Cache miss stat for mmap accesses */
+	/* 缓存上次 read() 位置 */
 	loff_t prev_pos;		/* Cache last read() position */
 };
 
 /*
  * Check if @index falls in the readahead windows.
  */
+/*
+ * 检查 @index 是否在预读窗口内
+ */
 static inline int ra_has_index(struct file_ra_state *ra, pgoff_t index)
 {
+	// 检查 `index` 是否在预读窗口内
 	return (index >= ra->start &&
 		index <  ra->start + ra->size);
 }
 
+// 表示文件挂载写入已获取
 #define FILE_MNT_WRITE_TAKEN	1
+// 表示文件挂载写入已释放
 #define FILE_MNT_WRITE_RELEASED	2
 
 // 文件对象，表示进程已打开的文件。文件对象是已打开的文件在内存中的表示。该对象由open系统调用创建，close系统调用撤销

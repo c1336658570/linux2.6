@@ -85,6 +85,8 @@ struct bdi_writeback {
 	struct list_head	b_more_io;	/* parked for more writeback */
 };
 
+
+// address_space中有一个指针指向该结构，代表预读信息
 /*
  * 后备设备信息结构。
  */

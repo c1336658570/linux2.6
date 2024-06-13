@@ -40,58 +40,87 @@
  * status of that page is hard.  See end_buffer_async_read() for the details.
  * There is no point in duplicating all that complexity.
  */
+/*
+ * I/O完成处理程序，用于多页BIO。
+ *
+ * mpage代码从不将部分页面放入BIO（除了文件末尾）。
+ * 如果页面没有映射到连续的块，则它会退回到block_read_full_page()。
+ *
+ * 为什么会这样？如果一个页面的完成依赖于多个不同的BIO，而这些BIO可以以任何顺序（或同时）完成，那么确定该页面的状态将非常困难。
+ * 参见end_buffer_async_read()了解详细信息。没有必要重复所有这些复杂性。
+ */
 static void mpage_end_io_read(struct bio *bio, int err)
 {
+	// 检查BIO是否更新
 	const int uptodate = test_bit(BIO_UPTODATE, &bio->bi_flags);
+	// 获取最后一个bio_vec
 	struct bio_vec *bvec = bio->bi_io_vec + bio->bi_vcnt - 1;
 
 	do {
+		// 获取bio_vec中的页面
 		struct page *page = bvec->bv_page;
-
+		
+		// 如果有下一个bio_vec，提前取回其flags
 		if (--bvec >= bio->bi_io_vec)
 			prefetchw(&bvec->bv_page->flags);
-
+		
+		// 如果BIO是最新的
 		if (uptodate) {
-			SetPageUptodate(page);
+			SetPageUptodate(page);	// 设置页面为最新
 		} else {
+			// 清除页面的最新标志
 			ClearPageUptodate(page);
+			// 设置页面错误
 			SetPageError(page);
 		}
-		unlock_page(page);
+		unlock_page(page);	// 解锁页面
+		// 循环处理所有bio_vec
 	} while (bvec >= bio->bi_io_vec);
-	bio_put(bio);
+	bio_put(bio);	// 释放BIO
 }
 
 static void mpage_end_io_write(struct bio *bio, int err)
 {
+	// 检查BIO是否更新
 	const int uptodate = test_bit(BIO_UPTODATE, &bio->bi_flags);
+	// 获取最后一个bio_vec
 	struct bio_vec *bvec = bio->bi_io_vec + bio->bi_vcnt - 1;
 
 	do {
+		// 获取bio_vec中的页面
 		struct page *page = bvec->bv_page;
 
+		// 如果有下一个bio_vec，提前取回其flags
 		if (--bvec >= bio->bi_io_vec)
 			prefetchw(&bvec->bv_page->flags);
 
+		// 如果BIO不是最新的
 		if (!uptodate){
+			// 设置页面错误
 			SetPageError(page);
 			if (page->mapping)
+				// 设置映射错误标志
 				set_bit(AS_EIO, &page->mapping->flags);
 		}
+		// 结束页面回写
 		end_page_writeback(page);
+		// 循环处理所有bio_vec
 	} while (bvec >= bio->bi_io_vec);
-	bio_put(bio);
+	bio_put(bio);	// 释放BIO
 }
 
 static struct bio *mpage_bio_submit(int rw, struct bio *bio)
 {
+	// 设置读取的完成处理程序
 	bio->bi_end_io = mpage_end_io_read;
-	if (rw == WRITE)
+	if (rw == WRITE)	// 如果是写操作
+	// 设置写入的完成处理程序
 		bio->bi_end_io = mpage_end_io_write;
-	submit_bio(rw, bio);
-	return NULL;
+	submit_bio(rw, bio);	// 提交BIO
+	return NULL;					// 返回NULL
 }
 
+// 分配一个新的BIO结构并初始化它
 static struct bio *
 mpage_alloc(struct block_device *bdev,
 		sector_t first_sector, int nr_vecs,
@@ -99,18 +128,22 @@ mpage_alloc(struct block_device *bdev,
 {
 	struct bio *bio;
 
+	// 尝试分配一个新的BIO结构
 	bio = bio_alloc(gfp_flags, nr_vecs);
 
+	// 如果内存分配失败，并且当前进程有PF_MEMALLOC标志
 	if (bio == NULL && (current->flags & PF_MEMALLOC)) {
-		while (!bio && (nr_vecs /= 2))
+		while (!bio && (nr_vecs /= 2))	// 尝试减少向量数量并重新分配BIO
 			bio = bio_alloc(gfp_flags, nr_vecs);
 	}
 
 	if (bio) {
+		// 设置BIO的块设备
 		bio->bi_bdev = bdev;
+		// 设置BIO的起始扇区
 		bio->bi_sector = first_sector;
 	}
-	return bio;
+	return bio;	// 返回分配的BIO结构
 }
 
 /*
@@ -123,9 +156,17 @@ mpage_alloc(struct block_device *bdev,
  * them.  So when the buffer is up to date and the page size == block size,
  * this marks the page up to date instead of adding new buffers.
  */
+/*
+ * 为mpage_readpages提供的支持函数。文件系统提供的get_block可能会返回一个最新的缓冲区。
+ * 这用于将该缓冲区映射到页面中，这样readpage就可以避免触发重复的get_block调用。
+ *
+ * 其目的是避免向没有缓冲区的页面添加缓冲区。因此，当缓冲区是最新的并且页面大小等于块大小时，
+ * 这会将页面标记为最新，而不是添加新的缓冲区。
+ */
 static void 
 map_buffer_to_page(struct page *page, struct buffer_head *bh, int page_block) 
 {
+	// 获取页面所属的inode
 	struct inode *inode = page->mapping->host;
 	struct buffer_head *page_bh, *head;
 	int block = 0;
@@ -135,24 +176,35 @@ map_buffer_to_page(struct page *page, struct buffer_head *bh, int page_block)
 		 * don't make any buffers if there is only one buffer on
 		 * the page and the page just needs to be set up to date
 		 */
+		/*
+		 * 如果页面上只有一个缓冲区，并且页面只需要设置为最新，则不创建任何缓冲区
+		 */
 		if (inode->i_blkbits == PAGE_CACHE_SHIFT && 
 		    buffer_uptodate(bh)) {
+			// 将页面设置为最新
 			SetPageUptodate(page);    
 			return;
 		}
+		// 创建空缓冲区
 		create_empty_buffers(page, 1 << inode->i_blkbits, 0);
 	}
+	// 获取页面的缓冲区头
 	head = page_buffers(page);
 	page_bh = head;
 	do {
 		if (block == page_block) {
+			// 设置页面缓冲区的状态
 			page_bh->b_state = bh->b_state;
+			// 设置页面缓冲区的块设备
 			page_bh->b_bdev = bh->b_bdev;
+			// 设置页面缓冲区的块号
 			page_bh->b_blocknr = bh->b_blocknr;
 			break;
 		}
+		// 获取下一个页面缓冲区
 		page_bh = page_bh->b_this_page;
 		block++;
+		// 遍历所有页面缓冲区
 	} while (page_bh != head);
 }
 
@@ -165,82 +217,127 @@ map_buffer_to_page(struct page *page, struct buffer_head *bh, int page_block)
  * represent the validity of its disk mapping and to decide when to do the next
  * get_block() call.
  */
+/*
+ * 这是一个工作例程，它完成了所有映射磁盘块的工作，构建最大可能的BIO，
+ * 并在磁盘上的块不连续时提交它们进行IO。
+ *
+ * 我们来回传递一个buffer_head，并使用其buffer_mapped()标志来表示其磁盘
+ * 映射的有效性，并决定何时进行下一个get_block()调用。
+ */
 static struct bio *
 do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 		sector_t *last_block_in_bio, struct buffer_head *map_bh,
 		unsigned long *first_logical_block, get_block_t get_block)
 {
+	// 获取页面所属的inode
 	struct inode *inode = page->mapping->host;
+	// 获取块大小的位数
 	const unsigned blkbits = inode->i_blkbits;
+	 // 每页包含的块数
 	const unsigned blocks_per_page = PAGE_CACHE_SIZE >> blkbits;
+	// 块大小
 	const unsigned blocksize = 1 << blkbits;
-	sector_t block_in_file;
-	sector_t last_block;
-	sector_t last_block_in_file;
+	sector_t block_in_file;	// 文件中的块号
+	sector_t last_block;		// 最后一个块号
+	sector_t last_block_in_file;	// 最后一个块号
+	// 存储块号的数组
 	sector_t blocks[MAX_BUF_PER_PAGE];
-	unsigned page_block;
+	unsigned page_block;	// 页块号
+	// 第一个空洞块号
 	unsigned first_hole = blocks_per_page;
+	// 块设备指针
 	struct block_device *bdev = NULL;
-	int length;
-	int fully_mapped = 1;
-	unsigned nblocks;
-	unsigned relative_block;
+	int length;	// 长度
+	int fully_mapped = 1;	// 是否完全映射标志
+	unsigned nblocks;		// 块数
+	unsigned relative_block;	// 相对块号
 
+	// 如果页面已经有缓冲区
 	if (page_has_buffers(page))
 		goto confused;
 
+	// 计算文件中的块号
 	block_in_file = (sector_t)page->index << (PAGE_CACHE_SHIFT - blkbits);
+	// 计算最后一个块号
 	last_block = block_in_file + nr_pages * blocks_per_page;
+	// 计算文件中的最后一个块号
 	last_block_in_file = (i_size_read(inode) + blocksize - 1) >> blkbits;
+	// 如果超出文件末尾
 	if (last_block > last_block_in_file)
+		// 调整最后一个块号
 		last_block = last_block_in_file;
+	// 初始化页块号
 	page_block = 0;
 
 	/*
 	 * Map blocks using the result from the previous get_blocks call first.
 	 */
-	nblocks = map_bh->b_size >> blkbits;
+	/*
+	 * 首先使用上一次get_blocks调用的结果来映射块。
+	 */
+	nblocks = map_bh->b_size >> blkbits;	// 计算缓冲区的块数
+	// 如果缓冲区已映射且块号在范围内
 	if (buffer_mapped(map_bh) && block_in_file > *first_logical_block &&
 			block_in_file < (*first_logical_block + nblocks)) {
+		// 计算映射偏移量
 		unsigned map_offset = block_in_file - *first_logical_block;
+		// 计算剩余块数
 		unsigned last = nblocks - map_offset;
 
+		// 遍历相对块
 		for (relative_block = 0; ; relative_block++) {
+			// 如果达到最后一个块
 			if (relative_block == last) {
+				// 清除映射标志
 				clear_buffer_mapped(map_bh);
 				break;
 			}
+			// 如果达到页面的块数
 			if (page_block == blocks_per_page)
 				break;
+			// 映射块号
 			blocks[page_block] = map_bh->b_blocknr + map_offset +
 						relative_block;
+			// 增加页块号
 			page_block++;
-			block_in_file++;
+			block_in_file++;	// 增加文件块号
 		}
-		bdev = map_bh->b_bdev;
+		bdev = map_bh->b_bdev;	// 设置块设备指针
 	}
 
 	/*
 	 * Then do more get_blocks calls until we are done with this page.
 	 */
-	map_bh->b_page = page;
+	/*
+	 * 然后进行更多的get_blocks调用，直到处理完这个页面。
+	 */
+	map_bh->b_page = page;	// 设置缓冲区的页面
+	// 如果还有未处理的页块
 	while (page_block < blocks_per_page) {
-		map_bh->b_state = 0;
-		map_bh->b_size = 0;
+		map_bh->b_state = 0;	// 重置缓冲区状态
+		map_bh->b_size = 0;		// 重置缓冲区大小
 
+		// 如果文件块号在范围内
 		if (block_in_file < last_block) {
+			// 设置缓冲区大小
 			map_bh->b_size = (last_block-block_in_file) << blkbits;
+			// 获取块映射
 			if (get_block(inode, block_in_file, map_bh, 0))
 				goto confused;
+			// 更新第一个逻辑块号
 			*first_logical_block = block_in_file;
 		}
 
+		// 如果缓冲区未映射
 		if (!buffer_mapped(map_bh)) {
+			// 设置未完全映射标志
 			fully_mapped = 0;
+			// 如果是第一个空洞块
 			if (first_hole == blocks_per_page)
+				// 设置第一个空洞块号
 				first_hole = page_block;
-			page_block++;
-			block_in_file++;
+			page_block++;			// 增加页块号
+			block_in_file++;	// 增加文件块号
 			continue;
 		}
 
@@ -250,81 +347,122 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 		 * we just collected from get_block into the page's buffers
 		 * so readpage doesn't have to repeat the get_block call
 		 */
+		/* 一些文件系统将在get_block调用期间将数据复制到页面，
+		 * 在这种情况下，我们不希望再次读取它。
+		 * map_buffer_to_page将我们刚刚从get_block收集的数据复制到页面的缓冲区中，
+		 * 这样readpage就不必重复get_block调用
+		 */
+		 // 如果缓冲区是最新的
 		if (buffer_uptodate(map_bh)) {
+			// 映射缓冲区到页面
 			map_buffer_to_page(page, map_bh, page_block);
 			goto confused;
 		}
-	
+
+		// 如果存在空洞块
 		if (first_hole != blocks_per_page)
+			// 跳到错误处理
 			goto confused;		/* hole -> non-hole */
 
 		/* Contiguous blocks? */
+		/* 连续块？ */
+		// 如果块不连续
 		if (page_block && blocks[page_block-1] != map_bh->b_blocknr-1)
 			goto confused;
+		// 计算缓冲区的块数
 		nblocks = map_bh->b_size >> blkbits;
+		// 遍历相对块
 		for (relative_block = 0; ; relative_block++) {
+			// 如果达到最后一个块
 			if (relative_block == nblocks) {
+				// 清除映射标志
 				clear_buffer_mapped(map_bh);
 				break;
+			// 如果达到页面的块数
 			} else if (page_block == blocks_per_page)
 				break;
+			// 映射块号
 			blocks[page_block] = map_bh->b_blocknr+relative_block;
-			page_block++;
-			block_in_file++;
+			page_block++;	// 增加页块号
+			block_in_file++;	// 增加文件块号
 		}
-		bdev = map_bh->b_bdev;
+		bdev = map_bh->b_bdev;	// 设置块设备指针
 	}
 
+	// 如果存在空洞块
 	if (first_hole != blocks_per_page) {
+		// 清零空洞块
 		zero_user_segment(page, first_hole << blkbits, PAGE_CACHE_SIZE);
+		// 如果第一个块是空洞块
 		if (first_hole == 0) {
+			// 设置页面为最新
 			SetPageUptodate(page);
+			// 解锁页面
 			unlock_page(page);
-			goto out;
+			goto out;	// 跳到退出
 		}
-	} else if (fully_mapped) {
+	} else if (fully_mapped) {	// 如果完全映射
+		// 设置页面映射到磁盘
 		SetPageMappedToDisk(page);
 	}
 
 	/*
 	 * This page will go to BIO.  Do we need to send this BIO off first?
 	 */
+	/*
+	 * 这个页面将进入BIO。我们是否需要先发送这个BIO？
+	 */
+	// 如果BIO存在且最后一个块不连续
 	if (bio && (*last_block_in_bio != blocks[0] - 1))
+		// 提交BIO
 		bio = mpage_bio_submit(READ, bio);
 
 alloc_new:
+	// 如果BIO为空
 	if (bio == NULL) {
+		// 分配新的BIO
 		bio = mpage_alloc(bdev, blocks[0] << (blkbits - 9),
 			  	min_t(int, nr_pages, bio_get_nr_vecs(bdev)),
 				GFP_KERNEL);
-		if (bio == NULL)
-			goto confused;
+		if (bio == NULL)	// 如果分配失败
+			goto confused;	// 跳到错误处理
 	}
 
+	// 计算长度
 	length = first_hole << blkbits;
+	// 添加页面到BIO
 	if (bio_add_page(bio, page, length, 0) < length) {
+		// 提交BIO
 		bio = mpage_bio_submit(READ, bio);
-		goto alloc_new;
+		goto alloc_new;	// 跳到分配新的BIO
 	}
 
+	// 计算相对块号
 	relative_block = block_in_file - *first_logical_block;
+	// 计算块数
 	nblocks = map_bh->b_size >> blkbits;
+	// 如果缓冲区边界或存在空洞块
 	if ((buffer_boundary(map_bh) && relative_block == nblocks) ||
 	    (first_hole != blocks_per_page))
+		// 提交BIO
 		bio = mpage_bio_submit(READ, bio);
 	else
+		// 更新最后一个块号
 		*last_block_in_bio = blocks[blocks_per_page - 1];
 out:
-	return bio;
+	return bio;	// 返回BIO
 
 confused:
-	if (bio)
+	if (bio)	// 如果BIO存在
+		// 提交BIO
 		bio = mpage_bio_submit(READ, bio);
+	// 如果页面不是最新的
 	if (!PageUptodate(page))
-	        block_read_full_page(page, get_block);
+		// 读取整个页面
+		block_read_full_page(page, get_block);
 	else
-		unlock_page(page);
-	goto out;
+		unlock_page(page);	// 解锁页面
+	goto out;	// 跳到退出
 }
 
 /**
@@ -370,57 +508,113 @@ confused:
  *
  * This all causes the disk requests to be issued in the correct order.
  */
+/**
+ * mpage_readpages - 使用一些页面填充地址空间并启动对它们的读取
+ * @mapping: 地址空间
+ * @pages: 包含目标页面的list_head地址。这些页面的index字段已填充，其他未初始化。
+ *   @pages->prev处的页面具有最低的文件偏移量，读取应按@pages->prev到@pages->next的顺序发出。
+ * @nr_pages: *@pages处的页面数量
+ * @get_block: 文件系统的块映射函数。
+ *
+ * 该函数遍历页面及每个页面中的块，构建并发出大BIOs。
+ *
+ * 如果发生任何异常情况，例如：
+ *
+ * - 遇到具有缓冲区的页面
+ * - 遇到在空洞后有非空洞的页面
+ * - 遇到具有非连续块的页面
+ *
+ * 那么该代码会放弃并调用基于buffer_head的读取函数。它确实会处理末尾有空洞的页面 - 这是一个常见情况：
+ * 适用于块大小小于PAGE_CACHE_SIZE的设置。
+ *
+ * BH_Boundary解释：
+ *
+ * 存在一个问题。mpage读取代码组装了多个页面，获取它们的磁盘映射，然后提交它们。这很好，但获取磁盘映射可能需要I/O。
+ * 例如，读取间接块。
+ *
+ * 因此，ext2文件的前16个块的mpage读取将导致按以下顺序提交I/O：
+ *  12 0 1 2 3 4 5 6 7 8 9 10 11 13 14 15 16
+ *
+ * 因为需要读取间接块以获取块13,14,15,16的映射。这显然影响了性能。
+ *
+ * 因此，我们允许文件系统的get_block()函数在映射块11时设置BH_Boundary。
+ * BH_Boundary表示：映射此块后的块将需要对可能靠近此块的块进行I/O。
+ * 因此，您应该推送当前累积的I/O。
+ *
+ * 这使得磁盘请求以正确的顺序发出。
+ */
 int
 mpage_readpages(struct address_space *mapping, struct list_head *pages,
 				unsigned nr_pages, get_block_t get_block)
 {
-	struct bio *bio = NULL;
-	unsigned page_idx;
+	struct bio *bio = NULL;	// 指向BIO结构的指针，初始为NULL
+	unsigned page_idx;			// 页面索引
+	// BIO中的最后一个块
 	sector_t last_block_in_bio = 0;
+	// 缓冲头结构
 	struct buffer_head map_bh;
+	// 第一个逻辑块
 	unsigned long first_logical_block = 0;
 
-	map_bh.b_state = 0;
-	map_bh.b_size = 0;
+	map_bh.b_state = 0;	// 初始化缓冲头状态
+	map_bh.b_size = 0;	// 初始化缓冲头大小
+	// 遍历页面
 	for (page_idx = 0; page_idx < nr_pages; page_idx++) {
+		// 获取页面
 		struct page *page = list_entry(pages->prev, struct page, lru);
 
-		prefetchw(&page->flags);
-		list_del(&page->lru);
+		prefetchw(&page->flags);	// 预取页面标志
+		list_del(&page->lru);			// 从链表中删除页面
+		// 添加页面到页面缓存LRU
 		if (!add_to_page_cache_lru(page, mapping,
 					page->index, GFP_KERNEL)) {
+			// 执行多页读取
 			bio = do_mpage_readpage(bio, page,
 					nr_pages - page_idx,
 					&last_block_in_bio, &map_bh,
 					&first_logical_block,
 					get_block);
 		}
+		// 释放页面缓存
 		page_cache_release(page);
 	}
+	// 如果页面列表不为空，触发BUG
 	BUG_ON(!list_empty(pages));
 	if (bio)
+		// 提交BIO读取
 		mpage_bio_submit(READ, bio);
-	return 0;
+	return 0;	// 返回0表示成功
 }
 EXPORT_SYMBOL(mpage_readpages);
 
 /*
  * This isn't called much at all
  */
+/*
+ * 这个函数很少被调用
+ */
 int mpage_readpage(struct page *page, get_block_t get_block)
 {
+	// 指向BIO结构的指针，初始为NULL
 	struct bio *bio = NULL;
+	// BIO中的最后一个块
 	sector_t last_block_in_bio = 0;
+	// 缓冲头结构
 	struct buffer_head map_bh;
+	// 第一个逻辑块
 	unsigned long first_logical_block = 0;
 
+	// 初始化缓冲头状态
 	map_bh.b_state = 0;
+	// 初始化缓冲头大小
 	map_bh.b_size = 0;
+	// 执行单页读取
 	bio = do_mpage_readpage(bio, page, 1, &last_block_in_bio,
 			&map_bh, &first_logical_block, get_block);
 	if (bio)
+		// 提交BIO读取
 		mpage_bio_submit(READ, bio);
-	return 0;
+	return 0;	// 返回0表示成功
 }
 EXPORT_SYMBOL(mpage_readpage);
 

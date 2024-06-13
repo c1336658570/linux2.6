@@ -573,44 +573,72 @@ static void ext2_splice_branch(struct inode *inode,
  * return = 0, if plain lookup failed.
  * return < 0, error case.
  */
+/*
+ * 分配策略很简单：如果我们需要分配，我们必须一路执行到叶子节点。
+ * 因此，在将任何内容连接到树上之前，先执行此操作，设置新生块之间的链接，
+ * 如果需要同步则写入它们，重新检查路径，如果检查失败则释放并重试，
+ * 否则设置最后一个缺失的链接（这将保护我们免受由截断生成的移除 -
+ * 路径上的所有块现在都是安全的）并可能强制对父块进行写入。
+ * 这还有一个好的额外属性：不需要从失败的分配中特别恢复 - 我们只需释放块
+ * 并不触碰从inode可达的任何内容。
+ *
+ * 如果create == 0，则`handle`可以为NULL。
+ *
+ * 返回值 > 0，映射或分配的块数。
+ * 返回值 = 0，如果简单查找失败。
+ * 返回值 < 0，错误情况。
+ */
 static int ext2_get_blocks(struct inode *inode,
 			   sector_t iblock, unsigned long maxblocks,
 			   struct buffer_head *bh_result,
 			   int create)
 {
-	int err = -EIO;
-	int offsets[4];
-	Indirect chain[4];
-	Indirect *partial;
-	ext2_fsblk_t goal;
-	int indirect_blks;
-	int blocks_to_boundary = 0;
-	int depth;
+	int err = -EIO;	// 默认错误代码
+	int offsets[4];	// 偏移数组
+	Indirect chain[4];	// 间接块链数组
+	Indirect *partial;	// 指向部分链的指针
+	ext2_fsblk_t goal;	// 目标物理块
+	int indirect_blks;	// 需要分配的间接块数量
+	int blocks_to_boundary = 0;	// 边界块数
+	int depth;		// 树的深度
+	// inode的ext2特定信息
 	struct ext2_inode_info *ei = EXT2_I(inode);
-	int count = 0;
-	ext2_fsblk_t first_block = 0;
+	int count = 0;	// 计数器
+	ext2_fsblk_t first_block = 0;	// 第一个块
 
+	// 获取块路径的深度
 	depth = ext2_block_to_path(inode,iblock,offsets,&blocks_to_boundary);
 
+	// 深度为0，返回错误
 	if (depth == 0)
 		return (err);
 
+	// 获取块链部分
 	partial = ext2_get_branch(inode, depth, offsets, chain, &err);
 	/* Simplest case - block found, no allocation needed */
+	/* 最简单的情况 - 块已找到，无需分配 */
 	if (!partial) {
+		// 获取链中最后一个块
 		first_block = le32_to_cpu(chain[depth - 1].key);
+		// 清理缓冲区的新标志
 		clear_buffer_new(bh_result); /* What's this do? */
 		count++;
 		/*map more blocks*/
+		/* 映射更多块 */
 		while (count < maxblocks && count <= blocks_to_boundary) {
 			ext2_fsblk_t blk;
 
+			// 验证链的完整性
 			if (!verify_chain(chain, chain + depth - 1)) {
 				/*
 				 * Indirect block might be removed by
 				 * truncate while we were reading it.
 				 * Handling of that case: forget what we've
 				 * got now, go to reread.
+				 */
+				/*
+				 * 间接块可能在我们读取时被截断删除。
+				 * 处理这种情况：忘记我们现在拥有的内容，重新读取。
 				 */
 				err = -EAGAIN;
 				count = 0;
@@ -622,15 +650,17 @@ static int ext2_get_blocks(struct inode *inode,
 			else
 				break;
 		}
+		// 如果没有错误，跳到块获取标签
 		if (err != -EAGAIN)
 			goto got_it;
 	}
 
 	/* Next simple case - plain lookup or failed read of indirect block */
+	/* 下一个简单的情况 - 简单查找或间接块读取失败 */
 	if (!create || err == -EIO)
 		goto cleanup;
 
-	mutex_lock(&ei->truncate_mutex);
+	mutex_lock(&ei->truncate_mutex);	// 获取截断互斥锁
 	/*
 	 * If the indirect block is missing while we are reading
 	 * the chain(ext3_get_branch() returns -EAGAIN err), or
@@ -643,19 +673,30 @@ static int ext2_get_blocks(struct inode *inode,
 	 * at this point, we will have the current copy of the chain when we
 	 * splice the branch into the tree.
 	 */
+	/*
+	 * 如果在读取链时间接块丢失（ext3_get_branch()返回-EAGAIN错误），
+	 * 或者在我们持有信号量后链已更改（因为其他进程截断了此分支，
+	 * 或者其他get_block分配了此分支），重新获取链以查看请求的块是否已分配。
+	 *
+	 * 由于我们此时已阻止截断/其他get_block，我们将获得链的当前副本
+	 * 当我们将分支接入树中时。
+	 */
 	if (err == -EAGAIN || !verify_chain(chain, partial)) {
 		while (partial > chain) {
-			brelse(partial->bh);
+			brelse(partial->bh);	// 释放缓冲区头
 			partial--;
 		}
+		// 重新获取块链部分
 		partial = ext2_get_branch(inode, depth, offsets, chain, &err);
 		if (!partial) {
 			count++;
+			// 释放截断互斥锁
 			mutex_unlock(&ei->truncate_mutex);
 			if (err)
 				goto cleanup;
+			// 清理缓冲区的新标志
 			clear_buffer_new(bh_result);
-			goto got_it;
+			goto got_it;	// 如果没有错误，跳到块获取标签
 		}
 	}
 
@@ -663,26 +704,39 @@ static int ext2_get_blocks(struct inode *inode,
 	 * Okay, we need to do block allocation.  Lazily initialize the block
 	 * allocation info here if necessary
 	*/
+	/*
+	 * 好的，我们需要进行块分配。如有必要，延迟初始化块分配信息
+	 */
+	// 延迟初始化块分配信息
 	if (S_ISREG(inode->i_mode) && (!ei->i_block_alloc_info))
 		ext2_init_block_alloc_info(inode);
 
+	// 查找目标物理块
 	goal = ext2_find_goal(inode, iblock, partial);
 
 	/* the number of blocks need to allocate for [d,t]indirect blocks */
+	/* 需要为[ind,t]间接块分配的块数量 */
 	indirect_blks = (chain + depth) - partial - 1;
 	/*
 	 * Next look up the indirect map to count the totoal number of
 	 * direct blocks to allocate for this branch.
+	 */
+	/*
+	 * 接下来查看间接映射以计算为此分支分配的直接块的总数。
 	 */
 	count = ext2_blks_to_allocate(partial, indirect_blks,
 					maxblocks, blocks_to_boundary);
 	/*
 	 * XXX ???? Block out ext2_truncate while we alter the tree
 	 */
+	/*
+	 * XXX ???? 阻止ext2_truncate在我们修改树时发生
+	 */
 	err = ext2_alloc_branch(inode, indirect_blks, &count, goal,
 				offsets + (partial - chain), partial);
 
 	if (err) {
+		// 释放截断互斥锁
 		mutex_unlock(&ei->truncate_mutex);
 		goto cleanup;
 	}
@@ -691,48 +745,63 @@ static int ext2_get_blocks(struct inode *inode,
 		/*
 		 * we need to clear the block
 		 */
+		/*
+		 * 我们需要清除块
+		 */
 		err = ext2_clear_xip_target (inode,
 			le32_to_cpu(chain[depth-1].key));
 		if (err) {
+			// 释放截断互斥锁
 			mutex_unlock(&ei->truncate_mutex);
 			goto cleanup;
 		}
 	}
 
+	// 将分支连接到树上
 	ext2_splice_branch(inode, iblock, partial, indirect_blks, count);
-	mutex_unlock(&ei->truncate_mutex);
-	set_buffer_new(bh_result);
+	mutex_unlock(&ei->truncate_mutex);	// 释放截断互斥锁
+	set_buffer_new(bh_result);	// 设置缓冲区的新标志
 got_it:
+	// 将块映射到缓冲区头
 	map_bh(bh_result, inode->i_sb, le32_to_cpu(chain[depth-1].key));
 	if (count > blocks_to_boundary)
+		// 设置缓冲区的边界标志
 		set_buffer_boundary(bh_result);
 	err = count;
 	/* Clean up and exit */
-	partial = chain + depth - 1;	/* the whole chain */
+	/* 清理并退出 */
+	partial = chain + depth - 1;	/* the whole chain */	/* 整个链 */
 cleanup:
 	while (partial > chain) {
-		brelse(partial->bh);
+		brelse(partial->bh);	// 释放缓冲区头
 		partial--;
 	}
-	return err;
+	return err;	// 返回错误代码或块计数
 }
 
+// 获取指定块的缓冲区头信息
 int ext2_get_block(struct inode *inode, sector_t iblock, struct buffer_head *bh_result, int create)
 {
+	// 计算最大块数
 	unsigned max_blocks = bh_result->b_size >> inode->i_blkbits;
+	// 调用ext2_get_blocks获取块信息
 	int ret = ext2_get_blocks(inode, iblock, max_blocks,
 			      bh_result, create);
+	// 如果成功获取到块信息
 	if (ret > 0) {
+		// 更新缓冲区头的大小
 		bh_result->b_size = (ret << inode->i_blkbits);
-		ret = 0;
+		ret = 0;	// 返回0表示成功
 	}
-	return ret;
+	return ret;	// 返回结果
 
 }
 
+// 获取文件的物理块映射信息
 int ext2_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 		u64 start, u64 len)
 {
+	// 调用generic_block_fiemap获取块映射信息
 	return generic_block_fiemap(inode, fieinfo, start, len,
 				    ext2_get_block);
 }
@@ -756,6 +825,7 @@ static int ext2_writepage(struct page *page, struct writeback_control *wbc)
 
 static int ext2_readpage(struct file *file, struct page *page)
 {
+	// 使用 mpage_readpage 函数读取页面，并调用 ext2_get_block 获取块信息
 	return mpage_readpage(page, ext2_get_block);
 }
 
@@ -763,6 +833,7 @@ static int
 ext2_readpages(struct file *file, struct address_space *mapping,
 		struct list_head *pages, unsigned nr_pages)
 {
+	// 使用 mpage_readpages 函数读取多个页面，并调用 ext2_get_block 获取块信息
 	return mpage_readpages(mapping, pages, nr_pages, ext2_get_block);
 }
 

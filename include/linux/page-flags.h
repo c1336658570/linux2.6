@@ -283,10 +283,17 @@ PAGEFLAG_FALSE(HWPoison)
 #define __PG_HWPOISON 0
 #endif
 
+/**
+ * 获取稳定页面标志。
+ */
 u64 stable_page_flags(struct page *page);
 
+/**
+ * 检查页面是否是最新的。
+ */
 static inline int PageUptodate(struct page *page)
 {
+	// 检查页面的PG_uptodate标志
 	int ret = test_bit(PG_uptodate, &(page)->flags);
 
 	/*
@@ -297,23 +304,37 @@ static inline int PageUptodate(struct page *page)
 	 *
 	 * See SetPageUptodate() for the other side of the story.
 	 */
+	/*
+	 * 必须确保在检查PageUptodate之后读取页面的数据。
+	 * 如果页面不是最新的，我们不会从中读取任何内容，因此可以跳过屏障。
+	 *
+	 * 参见SetPageUptodate()获取相应的说明。
+	 */
 	if (ret)
-		smp_rmb();
+		smp_rmb();	// 内存屏障，确保读取顺序
 
-	return ret;
+	return ret;	// 返回检查结果
 }
 
+/**
+ * 将页面标记为最新。
+ */
 static inline void __SetPageUptodate(struct page *page)
 {
-	smp_wmb();
+	smp_wmb();	// 内存屏障，确保写入顺序
+	// 设置页面的PG_uptodate标志
 	__set_bit(PG_uptodate, &(page)->flags);
 }
 
+/**
+ * 将页面标记为最新，并处理特定于架构的要求。
+ */
 static inline void SetPageUptodate(struct page *page)
 {
 #ifdef CONFIG_S390
+	// 设置PG_uptodate标志并返回之前的值
 	if (!test_and_set_bit(PG_uptodate, &page->flags))
-		page_clear_dirty(page);
+		page_clear_dirty(page);	// 清除页面的脏标志
 #else
 	/*
 	 * Memory barrier must be issued before setting the PG_uptodate bit,
@@ -323,7 +344,14 @@ static inline void SetPageUptodate(struct page *page)
 	 * s390 doesn't need an explicit smp_wmb here because the test and
 	 * set bit already provides full barriers.
 	 */
-	smp_wmb();
+	/*
+	 * 在设置PG_uptodate标志之前必须发出内存屏障，
+	 * 以确保使页面最新的所有之前的存储操作在PageUptodate变为真之前可见。
+	 *
+	 * s390不需要显式的smp_wmb，因为test_and_set_bit已经提供了完整的屏障。
+	 */
+	smp_wmb();	// 内存屏障，确保写入顺序
+	// 设置页面的PG_uptodate标志
 	set_bit(PG_uptodate, &(page)->flags);
 #endif
 }

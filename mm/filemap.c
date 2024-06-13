@@ -1592,31 +1592,39 @@ static ssize_t
 do_readahead(struct address_space *mapping, struct file *filp,
 	     pgoff_t index, unsigned long nr)
 {
+	// 如果 mapping 或者 mapping->a_ops 或者 mapping->a_ops->readpage 为空，
+	// 则返回 -EINVAL 错误
 	if (!mapping || !mapping->a_ops || !mapping->a_ops->readpage)
 		return -EINVAL;
 
+	// 强制执行页缓存预读
 	force_page_cache_readahead(mapping, filp, index, nr);
-	return 0;
+	return 0;	// 成功返回 0
 }
 
 SYSCALL_DEFINE(readahead)(int fd, loff_t offset, size_t count)
 {
-	ssize_t ret;
-	struct file *file;
+	ssize_t ret;	// 定义返回值变量
+	struct file *file;	// 定义文件指针
 
-	ret = -EBADF;
-	file = fget(fd);
-	if (file) {
+	ret = -EBADF;		// 如果文件描述符无效，默认返回 -EBADF 错误
+	file = fget(fd);	// 获取文件结构
+	if (file) {	// 如果文件以读模式打开
 		if (file->f_mode & FMODE_READ) {
+			// 获取文件的地址空间映射
 			struct address_space *mapping = file->f_mapping;
+			// 计算起始页号
 			pgoff_t start = offset >> PAGE_CACHE_SHIFT;
+			// 计算结束页号
 			pgoff_t end = (offset + count - 1) >> PAGE_CACHE_SHIFT;
+			// 计算页数
 			unsigned long len = end - start + 1;
+			// 执行预读操作
 			ret = do_readahead(mapping, file, start, len);
 		}
-		fput(file);
+		fput(file);		// 释放文件结构
 	}
-	return ret;
+	return ret;			// 返回结果
 }
 #ifdef CONFIG_HAVE_SYSCALL_WRAPPERS
 asmlinkage long SyS_readahead(long fd, loff_t offset, long count)

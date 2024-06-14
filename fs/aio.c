@@ -47,29 +47,41 @@
 #endif
 
 /*------ sysctl variables----*/
+/* 定义一个自旋锁，用于保护 aio_nr 变量 */
 static DEFINE_SPINLOCK(aio_nr_lock);
+/* 当前系统范围内的 AIO 请求数量 */
 unsigned long aio_nr;		/* current system wide number of aio requests */
+/* 系统范围内最大 AIO 请求数量，默认值为 0x10000 */
 unsigned long aio_max_nr = 0x10000; /* system wide maximum number of aio requests */
 /*----end sysctl variables---*/
 
+/* 定义两个内存缓存，用于分配 kiocb 和 kioctx 结构 */
 static struct kmem_cache	*kiocb_cachep;
 static struct kmem_cache	*kioctx_cachep;
 
+/* 定义一个工作队列，用于 AIO */
 static struct workqueue_struct *aio_wq;
 
 /* Used for rare fput completion. */
+/* 用于罕见的 fput 完成情况 */
 static void aio_fput_routine(struct work_struct *);
+/* 声明一个工作结构，用于 fput 例程 */
 static DECLARE_WORK(fput_work, aio_fput_routine);
 
+/* 定义一个自旋锁，用于保护 fput_head 列表 */
 static DEFINE_SPINLOCK(fput_lock);
+/* 定义一个链表头，用于 fput 列表 */
 static LIST_HEAD(fput_head);
 
+/* 在栈上分配，所以不要太大 */
 #define AIO_BATCH_HASH_BITS	3 /* allocated on-stack, so don't go crazy */
 #define AIO_BATCH_HASH_SIZE	(1 << AIO_BATCH_HASH_BITS)
+/* 定义一个结构，用于 AIO 批处理条目 */
 struct aio_batch_entry {
 	struct hlist_node list;
 	struct address_space *mapping;
 };
+/* 定义一个内存池，用于 aio_batch_entry 结构 */
 mempool_t *abe_pool;
 
 static void aio_kick_handler(struct work_struct *);
@@ -79,15 +91,24 @@ static void aio_queue_work(struct kioctx *);
  *	Creates the slab caches used by the aio routines, panic on
  *	failure as this is done early during the boot sequence.
  */
+/* aio_setup
+ * 创建 AIO 例程使用的 slab 缓存，如果失败则 panic，因为这是在启动序列早期完成的。
+ */
 static int __init aio_setup(void)
 {
+	/* 创建 kiocb 的 slab 缓存，带有硬件缓存对齐和 panic 标志 */
 	kiocb_cachep = KMEM_CACHE(kiocb, SLAB_HWCACHE_ALIGN|SLAB_PANIC);
+	/* 创建 kioctx 的 slab 缓存，带有硬件缓存对齐和 panic 标志 */
 	kioctx_cachep = KMEM_CACHE(kioctx,SLAB_HWCACHE_ALIGN|SLAB_PANIC);
 
+	/* 创建名为 "aio" 的工作队列 */
 	aio_wq = create_workqueue("aio");
+	/* 创建一个 kmalloc 内存池，用于 aio_batch_entry 结构 */
 	abe_pool = mempool_create_kmalloc_pool(1, sizeof(struct aio_batch_entry));
+	/* 如果内存池创建失败，则触发内核 BUG */
 	BUG_ON(!abe_pool);
 
+	/* 调试信息，打印 struct page 结构的大小 */
 	pr_debug("aio_setup: sizeof(struct page) = %d\n", (int)sizeof(struct page));
 
 	return 0;
@@ -384,15 +405,24 @@ out:
 /* wait_on_sync_kiocb:
  *	Waits on the given sync kiocb to complete.
  */
+/**
+ * wait_on_sync_kiocb - 等待给定的同步 kiocb 完成。
+ */
 ssize_t wait_on_sync_kiocb(struct kiocb *iocb)
 {
+	// 当 kiocb 的用户引用计数不为零时循环
 	while (iocb->ki_users) {
+		// 将当前任务状态设置为不可中断的睡眠状态
 		set_current_state(TASK_UNINTERRUPTIBLE);
+		// 再次检查 kiocb 的用户引用计数是否为零，如果是则跳出循环
 		if (!iocb->ki_users)
 			break;
+		// 调用调度函数进行 I/O 调度
 		io_schedule();
 	}
+	// 将当前任务状态设置为运行状态
 	__set_current_state(TASK_RUNNING);
+	// 返回 kiocb 的用户数据
 	return iocb->ki_user_data;
 }
 EXPORT_SYMBOL(wait_on_sync_kiocb);

@@ -5054,9 +5054,16 @@ EXPORT_SYMBOL(__cond_resched_softirq);
  * This is a shortcut for kernel-space yielding - it marks the
  * thread runnable and calls sys_sched_yield().
  */
+/**
+ * yield - 将当前处理器让给其他线程。
+ *
+ * 这是内核空间让出的快捷方式 - 它将线程标记为可运行并调用 sys_sched_yield()。
+ */
 void __sched yield(void)
 {
+	// 将当前任务状态设置为运行状态
 	set_current_state(TASK_RUNNING);
+	// 调用系统调度函数，进行调度
 	sys_sched_yield();
 }
 EXPORT_SYMBOL(yield);
@@ -5065,31 +5072,50 @@ EXPORT_SYMBOL(yield);
  * This task is about to go to sleep on IO. Increment rq->nr_iowait so
  * that process accounting knows that this is a task in IO wait state.
  */
+/*
+ * 这个任务即将因IO而进入休眠。增加 rq->nr_iowait 以便进程计算知道这是一个处于IO等待状态的任务。
+ */
 void __sched io_schedule(void)
 {
+	// 获取原始的 rq 结构体指针
 	struct rq *rq = raw_rq();
 
+	// 开始块IO延迟计数
 	delayacct_blkio_start();
+	// 增加 rq->nr_iowait 计数
 	atomic_inc(&rq->nr_iowait);
+	// 标记当前任务处于 IO 等待状态
 	current->in_iowait = 1;
+	// 调用调度函数，进行调度
 	schedule();
+	// 取消 IO 等待状态标记
 	current->in_iowait = 0;
+	// 减少 rq->nr_iowait 计数
 	atomic_dec(&rq->nr_iowait);
+	// 结束块IO延迟计数
 	delayacct_blkio_end();
 }
 EXPORT_SYMBOL(io_schedule);
 
 long __sched io_schedule_timeout(long timeout)
 {
+	// 获取原始的 rq 结构体指针
 	struct rq *rq = raw_rq();
 	long ret;
 
+	// 开始块IO延迟计数
 	delayacct_blkio_start();
+	// 增加 rq->nr_iowait 计数
 	atomic_inc(&rq->nr_iowait);
+	// 标记当前任务处于 IO 等待状态
 	current->in_iowait = 1;
+	// 调用超时调度函数，进行调度并返回剩余时间
 	ret = schedule_timeout(timeout);
+	// 取消 IO 等待状态标记
 	current->in_iowait = 0;
+	// 减少 rq->nr_iowait 计数
 	atomic_dec(&rq->nr_iowait);
+	// 结束块IO延迟计数
 	delayacct_blkio_end();
 	return ret;
 }

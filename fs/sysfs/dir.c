@@ -299,38 +299,45 @@ static const struct dentry_operations sysfs_dentry_ops = {
 	.d_iput		= sysfs_dentry_iput,
 };
 
+// sysfs_new_dirent函数用于创建一个新的sysfs目录项
 struct sysfs_dirent *sysfs_new_dirent(const char *name, umode_t mode, int type)
 {
-	char *dup_name = NULL;
-	struct sysfs_dirent *sd;
+	char *dup_name = NULL;	// 用于复制名称的临时指针
+	struct sysfs_dirent *sd;	// 声明一个sysfs_dirent结构体指针
 
+	// 如果type标志包含SYSFS_COPY_NAME，则复制name字符串
 	if (type & SYSFS_COPY_NAME) {
+		// 使用内核内存分配并复制名称
 		name = dup_name = kstrdup(name, GFP_KERNEL);
-		if (!name)
-			return NULL;
+		if (!name)	// 如果内存分配失败
+			return NULL;	// 返回NULL
 	}
 
+	// 使用内存缓存分配一个sysfs_dirent结构体
 	sd = kmem_cache_zalloc(sysfs_dir_cachep, GFP_KERNEL);
-	if (!sd)
-		goto err_out1;
+	if (!sd)	// 如果内存分配失败
+		goto err_out1;	// 跳转到错误处理代码1
 
+	 // 为sysfs目录项分配一个inode编号
 	if (sysfs_alloc_ino(&sd->s_ino))
-		goto err_out2;
+		goto err_out2;	// 如果分配失败，跳转到错误处理代码2
 
+	// 初始化目录项引用计数和活动状态计数
 	atomic_set(&sd->s_count, 1);
 	atomic_set(&sd->s_active, 0);
 
+	// 设置目录项的名称、模式和标志
 	sd->s_name = name;
 	sd->s_mode = mode;
 	sd->s_flags = type;
 
-	return sd;
+	return sd;	// 返回新创建的目录项指针
 
  err_out2:
-	kmem_cache_free(sysfs_dir_cachep, sd);
+	kmem_cache_free(sysfs_dir_cachep, sd);	// 释放已分配的内存
  err_out1:
-	kfree(dup_name);
-	return NULL;
+	kfree(dup_name);	// 释放复制的名称
+	return NULL;	// 返回NULL
 }
 
 /**
@@ -347,13 +354,24 @@ struct sysfs_dirent *sysfs_new_dirent(const char *name, umode_t mode, int type)
  *	Kernel thread context (may sleep).  sysfs_mutex is locked on
  *	return.
  */
+/**
+ *	sysfs_addrm_start - 准备添加或移除sysfs_dirent
+ *	@acxt: 将要使用的sysfs_addrm_cxt的指针
+ *	@parent_sd: 父sysfs_dirent
+ *
+ *	当调用者即将在@parent_sd下添加或移除sysfs_dirent时，调用此函数。
+ *	此函数获取sysfs_mutex。@acxt用于保存并传递上下文到其他addrm函数。
+ *
+ *	LOCKING:
+ *	内核线程上下文（可能会睡眠）。返回时，sysfs_mutex被锁定。
+ */
 void sysfs_addrm_start(struct sysfs_addrm_cxt *acxt,
 		       struct sysfs_dirent *parent_sd)
 {
-	memset(acxt, 0, sizeof(*acxt));
-	acxt->parent_sd = parent_sd;
+	memset(acxt, 0, sizeof(*acxt));	// 清零acxt结构体，准备填入新的数据
+	acxt->parent_sd = parent_sd;	// 设置父目录项
 
-	mutex_lock(&sysfs_mutex);
+	mutex_lock(&sysfs_mutex);	// 锁定sysfs的全局互斥体
 }
 
 /**
@@ -376,21 +394,43 @@ void sysfs_addrm_start(struct sysfs_addrm_cxt *acxt,
  *	0 on success, -EEXIST if entry with the given name already
  *	exists.
  */
+/**
+ *	__sysfs_add_one - 在不发出警告的情况下将sysfs_dirent添加到父目录
+ *	@acxt: 使用的addrm上下文
+ *	@sd: 要添加的sysfs_dirent
+ *
+ *	获取@acxt->parent_sd并将sd->s_parent设置为它，并且如果@sd是一个目录，
+ *	则增加父节点的nlink，并将其链接到父目录的子列表中。
+ *
+ *	此函数应该在sysfs_addrm_start()和sysfs_addrm_finish()调用之间被调用，
+ *	并应传递与传给sysfs_addrm_start()相同的@acxt。
+ *
+ *	LOCKING:
+ *	由sysfs_addrm_start()确定。
+ *
+ *	RETURNS:
+ *	成功时返回0，如果给定名称的条目已存在，则返回-EEXIST。
+ */
 int __sysfs_add_one(struct sysfs_addrm_cxt *acxt, struct sysfs_dirent *sd)
 {
 	struct sysfs_inode_attrs *ps_iattr;
 
+	// 如果父目录中已存在同名条目，则返回-EEXIST
 	if (sysfs_find_dirent(acxt->parent_sd, sd->s_name))
 		return -EEXIST;
 
+	// 获取父目录项的引用并设置为sd的父目录
 	sd->s_parent = sysfs_get(acxt->parent_sd);
 
+	// 将sd链接到其兄弟节点链表中
 	sysfs_link_sibling(sd);
 
 	/* Update timestamps on the parent */
+	/* 更新父目录的时间戳 */
 	ps_iattr = acxt->parent_sd->s_iattr;
 	if (ps_iattr) {
 		struct iattr *ps_iattrs = &ps_iattr->ia_iattr;
+		// 设置当前时间为修改和创建时间
 		ps_iattrs->ia_ctime = ps_iattrs->ia_mtime = CURRENT_TIME;
 	}
 
@@ -407,14 +447,25 @@ int __sysfs_add_one(struct sysfs_addrm_cxt *acxt, struct sysfs_dirent *sd)
  *
  *	XXX: does no error checking on @path size
  */
+/**
+ *	sysfs_pathname - 返回sysfs dirent的完整路径
+ *	@sd: 我们想要获取路径的sysfs_dirent
+ *	@path: 调用者分配的缓冲区
+ *
+ *	将名字“/”赋予sysfs_root条目；返回的任何路径都是相对于sysfs挂载位置的相对路径。
+ *
+ *	XXX: 对@path大小没有进行错误检查
+ */
 static char *sysfs_pathname(struct sysfs_dirent *sd, char *path)
 {
-	if (sd->s_parent) {
+	if (sd->s_parent) {	// 如果有父目录
+		// 递归调用以获取父目录的路径
 		sysfs_pathname(sd->s_parent, path);
-		strcat(path, "/");
+		strcat(path, "/");	// 在路径后加上分隔符"/"
 	}
+	// 将当前目录项的名称追加到路径上
 	strcat(path, sd->s_name);
-	return path;
+	return path;	// 返回构建的完整路径
 }
 
 /**
@@ -437,22 +488,42 @@ static char *sysfs_pathname(struct sysfs_dirent *sd, char *path)
  *	0 on success, -EEXIST if entry with the given name already
  *	exists.
  */
+/**
+ *	sysfs_add_one - 向父目录添加sysfs_dirent
+ *	@acxt: 用于操作的addrm上下文
+ *	@sd: 要添加的sysfs_dirent
+ *
+ *	获取@acxt->parent_sd并将其设置为sd->s_parent，如果sd是目录，则增加父节点inode的nlink，
+ *	并将其链接到父目录的子列表中。
+ *
+ *	此函数应在sysfs_addrm_start()和sysfs_addrm_finish()调用之间被调用，并且应传递与
+ *	sysfs_addrm_start()相同的@acxt。
+ *
+ *	锁定:
+ *	由sysfs_addrm_start()确定。
+ *
+ *	返回:
+ *	成功时返回0，如果给定名称的条目已存在则返回-EEXIST。
+ */
 int sysfs_add_one(struct sysfs_addrm_cxt *acxt, struct sysfs_dirent *sd)
 {
 	int ret;
 
+	// 尝试添加dirent
 	ret = __sysfs_add_one(acxt, sd);
-	if (ret == -EEXIST) {
+	if (ret == -EEXIST) {	 // 如果dirent已经存在
+	 	// 分配内存以保存路径
 		char *path = kzalloc(PATH_MAX, GFP_KERNEL);
+		// 输出警告信息
 		WARN(1, KERN_WARNING
 		     "sysfs: cannot create duplicate filename '%s'\n",
-		     (path == NULL) ? sd->s_name :
+		     (path == NULL) ? sd->s_name :	// 如果内存分配失败，只显示名字
 		     strcat(strcat(sysfs_pathname(acxt->parent_sd, path), "/"),
-		            sd->s_name));
-		kfree(path);
+		            sd->s_name));	// 如果内存分配成功，显示完整路径
+		kfree(path);	// 释放分配的内存
 	}
 
-	return ret;
+	return ret;	// 返回结果
 }
 
 /**
@@ -470,23 +541,44 @@ int sysfs_add_one(struct sysfs_addrm_cxt *acxt, struct sysfs_dirent *sd)
  *	LOCKING:
  *	Determined by sysfs_addrm_start().
  */
+/**
+ *	sysfs_remove_one - 从父目录中移除sysfs_dirent
+ *	@acxt: 用于操作的addrm上下文
+ *	@sd: 要移除的sysfs_dirent
+ *
+ *	如果@sd是目录，则标记@sd为已移除并减少父节点inode的nlink。
+ *	@sd从子列表中断开链接。
+ *
+ *	此函数应在sysfs_addrm_start()和sysfs_addrm_finish()调用之间被调用，
+ *	并且应传递与sysfs_addrm_start()相同的@acxt。
+ *
+ *	锁定:
+ *	由sysfs_addrm_start()确定。
+ */
 void sysfs_remove_one(struct sysfs_addrm_cxt *acxt, struct sysfs_dirent *sd)
 {
 	struct sysfs_inode_attrs *ps_iattr;
 
+	// 断言sd未被标记为已移除
 	BUG_ON(sd->s_flags & SYSFS_FLAG_REMOVED);
 
+	// 从其父目录的子列表中断开sd的链接
 	sysfs_unlink_sibling(sd);
 
 	/* Update timestamps on the parent */
+	/* 更新父目录的时间戳 */
 	ps_iattr = acxt->parent_sd->s_iattr;
-	if (ps_iattr) {
+	if (ps_iattr) {	// 如果父目录具有inode属性
 		struct iattr *ps_iattrs = &ps_iattr->ia_iattr;
+		// 更新ctime和mtime为当前时间
 		ps_iattrs->ia_ctime = ps_iattrs->ia_mtime = CURRENT_TIME;
 	}
 
+	// 标记sd为已移除
 	sd->s_flags |= SYSFS_FLAG_REMOVED;
+	// 将sd添加到已移除的链表中
 	sd->s_sibling = acxt->removed;
+	// 更新addrm上下文的removed指针
 	acxt->removed = sd;
 }
 
@@ -501,20 +593,38 @@ void sysfs_remove_one(struct sysfs_addrm_cxt *acxt, struct sysfs_dirent *sd)
  *	LOCKING:
  *	sysfs_mutex is released.
  */
+/**
+ *	sysfs_addrm_finish - 完成sysfs_dirent的添加或移除
+ *	@acxt: 要完成的addrm上下文
+ *
+ *	完成对sysfs_dirent的添加或移除操作。释放由sysfs_addrm_start()获取的资源，
+ *	并清理已移除的sysfs_dirents。
+ *
+ *	锁定:
+ *	释放sysfs_mutex。
+ */
 void sysfs_addrm_finish(struct sysfs_addrm_cxt *acxt)
 {
 	/* release resources acquired by sysfs_addrm_start() */
-	mutex_unlock(&sysfs_mutex);
+	/* 释放由sysfs_addrm_start()获取的资源 */
+	mutex_unlock(&sysfs_mutex);	// 释放之前在sysfs_addrm_start()中获取的互斥锁
 
 	/* kill removed sysfs_dirents */
-	while (acxt->removed) {
+	/* 清理已移除的sysfs_dirents */
+	while (acxt->removed) {	// 遍历已移除的目录项列表
+	// 取出列表中的第一个元素
 		struct sysfs_dirent *sd = acxt->removed;
 
+		// 更新列表头指针到下一个元素
 		acxt->removed = sd->s_sibling;
+		// 清除当前目录项的s_sibling指针，断开与链表的链接
 		sd->s_sibling = NULL;
 
+		// 取消激活目录项，使其不再可访问
 		sysfs_deactivate(sd);
+		// 如果目录项与二进制文件相关联，则取消映射
 		unmap_bin_file(sd);
+		// 减少目录项的引用计数，可能会导致其释放
 		sysfs_put(sd);
 	}
 }

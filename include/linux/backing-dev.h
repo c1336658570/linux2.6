@@ -66,6 +66,7 @@ enum bdi_stat_item {
  */
 struct bdi_writeback {
 	/* 挂在bdi下的列表 */
+	// 是backing_dev_info中wb_list链表的一个元素
 	struct list_head list;			/* hangs off the bdi */
 
 	/* 指向父backing_dev_info的指针 */
@@ -75,7 +76,7 @@ struct bdi_writeback {
 	/* 上次老数据刷新时间 */
 	unsigned long last_old_flush;		/* last old data flush */
 
-	/* 写回任务 */
+	/* 写回任务线程 */
 	struct task_struct	*task;		/* writeback task */
 	/* 脏inode列表 */
 	struct list_head	b_dirty;	/* dirty inodes */
@@ -91,6 +92,7 @@ struct bdi_writeback {
  * 后备设备信息结构。
  */
 struct backing_dev_info {
+	// 挂在全局的bdi_list下，bdi_list在mm/backing-dev.c定义
 	struct list_head bdi_list;	/* BDI列表 */
 	struct rcu_head rcu_head;	/* 用于RCU同步的头部 */
 	/* 最大预读大小，以PAGE_CACHE_SIZE为单位 */
@@ -131,6 +133,7 @@ struct backing_dev_info {
 	/* 保护wb_list更新的锁 */
 	spinlock_t wb_lock;	  /* protects update side of wb_list */
 	/* 挂在这个bdi下的刷新线程 */
+	// 该设备下的bid_writeback链表
 	struct list_head wb_list; /* the flusher threads hanging off this bdi */
 	/* 已注册任务的位掩码 */
 	unsigned long wb_mask;	  /* bitmask of registered tasks */

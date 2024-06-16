@@ -33,6 +33,8 @@
 #include <linux/rcupdate.h>
 
 
+// radix树通过long型的位操作来查询各个节点， 存储效率高，并且可以快速查询。
+
 #ifdef __KERNEL__
 #define RADIX_TREE_MAP_SHIFT	(CONFIG_BASE_SMALL ? 4 : 6)
 #else
@@ -46,10 +48,21 @@
 	((RADIX_TREE_MAP_SIZE + BITS_PER_LONG - 1) / BITS_PER_LONG)
 
 struct radix_tree_node {
+	// height 表示的整个 radix树的高度（即叶子节点到树根的高度），
+	//  不是当前节点到树根的高度
+	/* radix树的高度 */
 	unsigned int	height;		/* Height from the bottom */
+	// 表示当前节点的子节点个数，叶子节点的 count=0
+	/* 当前节点的子节点数目 */
 	unsigned int	count;
+	// RCU发生时触发的回调函数链表
+	/* RCU 回调函数链表 */
 	struct rcu_head	rcu_head;
+	// 每个slot对应一个子节点（叶子节点）
+	/* 节点中的slot数组 */
 	void		*slots[RADIX_TREE_MAP_SIZE];
+	// 标记子节点是否 dirty 或者 wirteback
+	/* slot标签 */
 	unsigned long	tags[RADIX_TREE_MAX_TAGS][RADIX_TREE_TAG_LONGS];
 };
 

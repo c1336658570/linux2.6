@@ -133,6 +133,7 @@ struct device_private {
 	struct klist_node knode_parent;   // 位于父设备兄弟列表中的节点
 	struct klist_node knode_driver;   // 位于驱动列表中的节点
 	struct klist_node knode_bus;      // 位于总线列表中的节点
+	// 比如指向 struct backing_dev_info
 	void *driver_data;                // 驱动特定数据，预留作为私有指针
 	struct device *device;            // 指向关联的 struct device
 };

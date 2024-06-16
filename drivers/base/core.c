@@ -824,49 +824,77 @@ EXPORT_SYMBOL_GPL(dev_set_name);
  * device_remove_sys_dev_entry() will disagree about the the presence
  * of the link.
  */
+/**
+ * device_to_dev_kobj - 选择设备的/sys/dev/目录
+ * @dev: 设备
+ *
+ * 默认情况下，我们为新条目选择char/目录。如果class->dev_kobj设置为NULL，
+ * 则不会创建条目。class->dev_kobj必须在向类注册任何设备之前设置（或清除），
+ * 否则device_create_sys_dev_entry()和device_remove_sys_dev_entry()
+ * 将对链接的存在性存在分歧。
+ */
 static struct kobject *device_to_dev_kobj(struct device *dev)
 {
 	struct kobject *kobj;
 
 	if (dev->class)
+		// 如果设备有类，则使用该类的dev_kobj
 		kobj = dev->class->dev_kobj;
 	else
+		// 否则，默认使用系统提供的字符设备目录对象
 		kobj = sysfs_dev_char_kobj;
 
 	return kobj;
 }
 
+/**
+ * 创建设备的sysfs条目
+ */
 static int device_create_sys_dev_entry(struct device *dev)
 {
+	// 获取设备的kobject
 	struct kobject *kobj = device_to_dev_kobj(dev);
 	int error = 0;
 	char devt_str[15];
 
+	// 如果kobject存在
 	if (kobj) {
+		// 格式化设备号为字符串
 		format_dev_t(devt_str, dev->devt);
+		// 创建一个到设备kobject的链接
 		error = sysfs_create_link(kobj, &dev->kobj, devt_str);
 	}
 
 	return error;
 }
 
+/**
+ * 删除设备的sysfs条目
+ */
 static void device_remove_sys_dev_entry(struct device *dev)
 {
+	// 获取设备的kobject
 	struct kobject *kobj = device_to_dev_kobj(dev);
 	char devt_str[15];
 
-	if (kobj) {
+	if (kobj) {	// 如果kobject存在
+		// 格式化设备号为字符串
 		format_dev_t(devt_str, dev->devt);
 		sysfs_remove_link(kobj, devt_str);
 	}
 }
 
+/**
+ * 初始化设备私有数据结构
+ */
 int device_private_init(struct device *dev)
 {
+	// 分配私有数据结构
 	dev->p = kzalloc(sizeof(*dev->p), GFP_KERNEL);
 	if (!dev->p)
-		return -ENOMEM;
-	dev->p->device = dev;
+		return -ENOMEM;	// 内存分配失败，返回错误
+	dev->p->device = dev;	// 设置私有数据中的设备指针
+	// 初始化子设备链表
 	klist_init(&dev->p->klist_children, klist_children_get,
 		   klist_children_put);
 	return 0;

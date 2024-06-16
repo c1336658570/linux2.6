@@ -312,46 +312,60 @@ static void task_dirty_limit(struct task_struct *tsk, unsigned long *pdirty)
 /*
  *
  */
+// 定义一个静态变量来存储全局的最小比率值
 static unsigned int bdi_min_ratio;
 
+// 设置给定BDI的最小比率
 int bdi_set_min_ratio(struct backing_dev_info *bdi, unsigned int min_ratio)
 {
-	int ret = 0;
+	int ret = 0;	// 默认返回值为0，表示成功
 
+	// 加锁以保护对BDI结构的更改
 	spin_lock_bh(&bdi_lock);
+	// 如果新的最小比率大于当前的最大比率，则返回错误
 	if (min_ratio > bdi->max_ratio) {
 		ret = -EINVAL;
 	} else {
+		// 计算与当前最小比率的差值
 		min_ratio -= bdi->min_ratio;
+		// 确保全局最小比率之和小于100
 		if (bdi_min_ratio + min_ratio < 100) {
+			// 更新全局最小比率
 			bdi_min_ratio += min_ratio;
+			// 更新BDI的最小比率
 			bdi->min_ratio += min_ratio;
 		} else {
-			ret = -EINVAL;
+			ret = -EINVAL;	// 如果超出范围，返回错误
 		}
 	}
-	spin_unlock_bh(&bdi_lock);
+	spin_unlock_bh(&bdi_lock);	// 解锁
 
-	return ret;
+	return ret;	// 返回结果
 }
 
+// 设置给定BDI的最大比率
 int bdi_set_max_ratio(struct backing_dev_info *bdi, unsigned max_ratio)
 {
-	int ret = 0;
+	int ret = 0;		// 默认返回值为0，表示成功
 
+	// 最大比率不能超过100%
 	if (max_ratio > 100)
 		return -EINVAL;
 
+	// 加锁以保护对BDI结构的更改
 	spin_lock_bh(&bdi_lock);
+	// 如果新的最大比率小于当前的最小比率，则返回错误
 	if (bdi->min_ratio > max_ratio) {
 		ret = -EINVAL;
 	} else {
+		// 设置BDI的最大比率
 		bdi->max_ratio = max_ratio;
+		// 计算并设置最大比率对应的属性分数
 		bdi->max_prop_frac = (PROP_FRAC_BASE * max_ratio) / 100;
 	}
-	spin_unlock_bh(&bdi_lock);
+	spin_unlock_bh(&bdi_lock);	// 解锁
 
-	return ret;
+	return ret;	// 返回结果
 }
 EXPORT_SYMBOL(bdi_set_max_ratio);
 

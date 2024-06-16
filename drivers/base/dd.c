@@ -396,25 +396,36 @@ void driver_detach(struct device_driver *drv)
  * These exports can't be _GPL due to .h files using this within them, and it
  * might break something that was previously working...
  */
+/*
+ * 这些导出函数不能使用 _GPL，因为有些 .h 文件中使用了这些函数，
+ * 如果改变它们的导出方式，可能会破坏之前能正常工作的代码...
+ */
+// 从设备结构中获取存储的私有数据
 void *dev_get_drvdata(const struct device *dev)
 {
+	// 确保设备结构及其私有数据指针存在
 	if (dev && dev->p)
+		// 返回私有数据
 		return dev->p->driver_data;
-	return NULL;
+	return NULL;	// 如果设备结构不存在或无私有数据指针，则返回 NULL
 }
 EXPORT_SYMBOL(dev_get_drvdata);
 
+// 设置设备结构中的私有数据
 void dev_set_drvdata(struct device *dev, void *data)
 {
-	int error;
+	int error;	// 用于捕捉错误码
 
-	if (!dev)
+	if (!dev)	// 如果设备结构不存在，则直接返回
 		return;
+	// 如果设备结构中没有私有数据结构
 	if (!dev->p) {
+		// 初始化设备的私有数据结构
 		error = device_private_init(dev);
-		if (error)
-			return;
+		if (error)	// 如果初始化失败
+			return;	// 直接返回
 	}
+	// 将传入的数据设置为设备的私有数据
 	dev->p->driver_data = data;
 }
 EXPORT_SYMBOL(dev_set_drvdata);

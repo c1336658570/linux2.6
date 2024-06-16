@@ -712,19 +712,20 @@ struct address_space {
 	// 通常address_space会和索引节点(inode)关联，此时host指向此inode
 	// 如果address_space不是和索引节点关联，比如和swapper关联，则host域是NULL。
 	struct inode		*host;		/* owner: inode, block_device */
-	/* 所有页面的基数树 */
+	/* 包含全部页面的 radix 树 */
 	struct radix_tree_root	page_tree;	/* radix tree of all pages */
 	/* 保护基数树的自旋锁 */
 	spinlock_t		tree_lock;	/* and lock protecting it */
-	/* 可写的 VM_SHARED 映射的计数 */
+	/* 可写的 VM_SHARED 映射的计数 */	
 	unsigned int		i_mmap_writable;/* count VM_SHARED mappings */
 	/* 私有和共享映射的优先级树 */
 	// imap是一个优先搜索树，它的搜索范围包含了在address_space范围内所有共享的和私有的映射页面。
 	// 优先搜索树是将堆和radix结合形成的快速检索树。可以帮助内核高效找到关联的被缓存文件
+	// i_mmap - 根据 vm_area_struct，能够快速的找到关联的缓存文件(即 address_space)，
 	struct prio_tree_root	i_mmap;		/* tree of private and shared mappings */
 	/* VM_NONLINEAR 映射列表 */
 	struct list_head	i_mmap_nonlinear;/*list VM_NONLINEAR mappings */
-	/* 保护映射树、计数和列表的自旋锁 */
+	/* 保护映射树、计数和列表的自旋锁 */	/* 保护 i_map 的自旋锁 */
 	spinlock_t		i_mmap_lock;	/* protect tree, count, list */
 	/* 用于处理与截断操作相关的竞态条件 */
 	// 截断计数

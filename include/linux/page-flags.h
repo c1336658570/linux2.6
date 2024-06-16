@@ -72,6 +72,21 @@
  * SPARSEMEM section (for variants of SPARSEMEM that require section ids like
  * SPARSEMEM_EXTREME with !SPARSEMEM_VMEMMAP).
  */
+/**
+ * 双链策略中，每个页面都有2个标志位，分别为
+ * PG_active - 标志页面是否活跃，也就是表示此页面是否要移动到活跃链表
+ * PG_referenced - 表示页面是否被进程访问到
+ * 
+ * 当页面第一次被被访问时，PG_active 置为1，加入到活动链表
+ * 
+ * 当页面再次被访问时，PG_referenced 置为1，此时如果页面在非活动链表，
+ * 则将其移动到活动链表，并将PG_active置为1，PG_referenced 置为0
+ * 
+ * 系统中 daemon 会定时扫描活动链表，定时将页面的 PG_referenced 位置为0
+ * 
+ * 系统中 daemon 定时检查页面的 PG_referenced，如果 PG_referenced=0，
+ * 那么将此页面的 PG_active 置为0，同时将页面移动到非活动链表
+ */
 enum pageflags {
 	PG_locked,		/* Page is locked. Don't touch. */	/* 页面被锁定。不要触碰。 */
 	PG_error,			/* 页面出现了错误。 */

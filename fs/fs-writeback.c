@@ -73,6 +73,7 @@ struct wb_writeback_args {
  */
 struct bdi_work {
 	/* 待处理工作列表 */
+	// 挂在backing_dev_info的work_list下
 	struct list_head list;		/* pending work list */
 	/* 用于RCU释放或清理工作项 */
 	struct rcu_head rcu_head;	/* for RCU free/clear of work */

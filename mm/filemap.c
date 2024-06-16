@@ -486,40 +486,62 @@ EXPORT_SYMBOL(filemap_write_and_wait_range);
  * This function is used to add a page to the pagecache. It must be locked.
  * This function does not add the page to the LRU.  The caller must do that.
  */
+/**
+ * add_to_page_cache_locked - 将锁定的页面添加到页面缓存中
+ * @page: 要添加的页面
+ * @mapping: 页面的地址空间
+ * @offset: 页面索引
+ * @gfp_mask: 页面分配模式
+ *
+ * 这个函数用于将一个页面添加到页面缓存。页面必须是锁定的。
+ * 这个函数不会将页面添加到LRU列表中。调用者必须自行处理。
+ */
 int add_to_page_cache_locked(struct page *page, struct address_space *mapping,
 		pgoff_t offset, gfp_t gfp_mask)
 {
 	int error;
 
+	// 确保页面是锁定的
 	VM_BUG_ON(!PageLocked(page));
 
+	// 尝试对页面进行内存组费用计算
 	error = mem_cgroup_cache_charge(page, current->mm,
 					gfp_mask & GFP_RECLAIM_MASK);
 	if (error)
 		goto out;
 
+	// 为页面树预加载，准备插入操作
 	error = radix_tree_preload(gfp_mask & ~__GFP_HIGHMEM);
 	if (error == 0) {
+		// 获取页面的引用
 		page_cache_get(page);
+		// 设置页面的映射和索引
 		page->mapping = mapping;
 		page->index = offset;
 
+		// 锁定页面树并尝试插入页面
 		spin_lock_irq(&mapping->tree_lock);
 		error = radix_tree_insert(&mapping->page_tree, offset, page);
 		if (likely(!error)) {
+			// 插入成功，更新统计数据
 			mapping->nrpages++;
 			__inc_zone_page_state(page, NR_FILE_PAGES);
 			if (PageSwapBacked(page))
 				__inc_zone_page_state(page, NR_SHMEM);
 			spin_unlock_irq(&mapping->tree_lock);
 		} else {
+			// 插入失败，清除页面的映射
 			page->mapping = NULL;
 			spin_unlock_irq(&mapping->tree_lock);
+			// 取消页面的内存组费用计算
 			mem_cgroup_uncharge_cache_page(page);
+			// 释放页面的引用
 			page_cache_release(page);
 		}
+		// 结束预加载
 		radix_tree_preload_end();
 	} else
+		// 如果预加载失败，也进行费用取消操作
 		mem_cgroup_uncharge_cache_page(page);
 out:
 	return error;
@@ -776,6 +798,15 @@ EXPORT_SYMBOL(find_get_page);
  *
  * Returns zero if the page was not present. find_lock_page() may sleep.
  */
+/**
+ * find_lock_page - 定位、固定并锁定一个页面缓存页面
+ * @mapping: 要搜索的地址空间
+ * @offset: 页面索引
+ *
+ * 定位所需的页面缓存页面，锁定它，增加其引用计数，并返回它的地址。
+ *
+ * 如果页面不存在则返回零。find_lock_page() 可能会休眠。
+ */
 struct page *find_lock_page(struct address_space *mapping, pgoff_t offset)
 {
 	struct page *page;
@@ -783,13 +814,16 @@ struct page *find_lock_page(struct address_space *mapping, pgoff_t offset)
 repeat:
 	page = find_get_page(mapping, offset);
 	if (page) {
+		// 锁定页面
 		lock_page(page);
 		/* Has the page been truncated? */
+		/* 页面是否被截断了？ */
 		if (unlikely(page->mapping != mapping)) {
-			unlock_page(page);
-			page_cache_release(page);
-			goto repeat;
+			unlock_page(page);	// 解锁页面
+			page_cache_release(page);	// 释放页面
+			goto repeat;	// 重试
 		}
+		// 确保页面索引正确
 		VM_BUG_ON(page->index != offset);
 	}
 	return page;
@@ -813,6 +847,19 @@ EXPORT_SYMBOL(find_lock_page);
  * find_or_create_page() returns the desired page's address, or zero on
  * memory exhaustion.
  */
+/**
+ * find_or_create_page - 定位或添加一个页面缓存页面
+ * @mapping: 页面的地址空间
+ * @index: 页面在映射中的索引
+ * @gfp_mask: 页面分配模式
+ *
+ * 定位页面缓存中的一个页面。如果页面不存在，使用 @gfp_mask 分配一个新页面，
+ * 并将其添加到页面缓存和 VM 的 LRU 列表中。返回的页面被锁定且其引用计数增加。
+ *
+ * find_or_create_page() 可能会休眠，即使 @gfp_flags 指定了一个原子分配！
+ *
+ * find_or_create_page() 返回所需页面的地址，或在内存耗尽时返回零。
+ */
 struct page *find_or_create_page(struct address_space *mapping,
 		pgoff_t index, gfp_t gfp_mask)
 {
@@ -821,22 +868,28 @@ struct page *find_or_create_page(struct address_space *mapping,
 repeat:
 	page = find_lock_page(mapping, index);
 	if (!page) {
+		// 分配新页面
 		page = __page_cache_alloc(gfp_mask);
 		if (!page)
-			return NULL;
+			return NULL;	// 内存耗尽，返回NULL
 		/*
 		 * We want a regular kernel memory (not highmem or DMA etc)
 		 * allocation for the radix tree nodes, but we need to honour
 		 * the context-specific requirements the caller has asked for.
 		 * GFP_RECLAIM_MASK collects those requirements.
 		 */
+		/*
+		 * 我们需要常规内核内存（非高端内存或 DMA 等）
+		 * 用于基数树节点的分配，但我们需要遵守调用者要求的上下文特定需求。
+		 * GFP_RECLAIM_MASK 收集这些要求。
+		 */
 		err = add_to_page_cache_lru(page, mapping, index,
 			(gfp_mask & GFP_RECLAIM_MASK));
 		if (unlikely(err)) {
-			page_cache_release(page);
+			page_cache_release(page);	// 释放页面
 			page = NULL;
 			if (err == -EEXIST)
-				goto repeat;
+				goto repeat;	// 重试
 		}
 	}
 	return page;
@@ -859,6 +912,20 @@ EXPORT_SYMBOL(find_or_create_page);
  *
  * find_get_pages() returns the number of pages which were found.
  */
+/**
+ * find_get_pages - 查找并获取一组页面
+ * @mapping: 要搜索的地址空间
+ * @start: 开始搜索的页面索引
+ * @nr_pages: 最多返回的页面数
+ * @nu_pages: 结果放置的页面数组
+ *
+ * find_get_pages() 会在地址空间中搜索并返回最多 @nr_pages 个页面。这些页面放置在 @pages 中。
+ * find_get_pages() 会对返回的页面增加引用计数。
+ *
+ * 搜索返回一组具有连续索引的页面。由于可能存在未出现的页面，索引之间可能存在空洞。
+ *
+ * find_get_pages() 返回找到的页面数量。
+ */
 unsigned find_get_pages(struct address_space *mapping, pgoff_t start,
 			    unsigned int nr_pages, struct page **pages)
 {
@@ -866,38 +933,45 @@ unsigned find_get_pages(struct address_space *mapping, pgoff_t start,
 	unsigned int ret;
 	unsigned int nr_found;
 
-	rcu_read_lock();
+	rcu_read_lock();	// 开启RCU读锁保护
 restart:
+	// 使用 radix tree 查找给定范围内的页面
 	nr_found = radix_tree_gang_lookup_slot(&mapping->page_tree,
 				(void ***)pages, start, nr_pages);
 	ret = 0;
 	for (i = 0; i < nr_found; i++) {
+		// 遍历找到的页面
 		struct page *page;
 repeat:
+		// 解引用radix tree的槽以获取页面
 		page = radix_tree_deref_slot((void **)pages[i]);
+		// 如果页面为空，跳过
 		if (unlikely(!page))
 			continue;
 		/*
 		 * this can only trigger if nr_found == 1, making livelock
 		 * a non issue.
 		 */
+		// 如果槽返回了RETRY指针，需要重新开始查找
 		if (unlikely(page == RADIX_TREE_RETRY))
 			goto restart;
-
+		
+		// 尝试获取页面的引用计数
 		if (!page_cache_get_speculative(page))
 			goto repeat;
 
 		/* Has the page moved? */
+		// 检查页面是否已经移动
 		if (unlikely(page != *((void **)pages[i]))) {
-			page_cache_release(page);
+			page_cache_release(page);	// 释放页面并重试
 			goto repeat;
 		}
 
-		pages[ret] = page;
-		ret++;
+		pages[ret] = page;	// 将找到的页面存入返回数组
+		ret++;		// 更新找到的页面数
 	}
-	rcu_read_unlock();
-	return ret;
+	rcu_read_unlock();	// 释放RCU读锁
+	return ret;					// 返回找到的页面数
 }
 
 /**
@@ -912,49 +986,70 @@ repeat:
  *
  * find_get_pages_contig() returns the number of pages which were found.
  */
+/**
+ * find_get_pages_contig - 连续页面查找
+ * @mapping:	要搜索的地址空间
+ * @index:	起始页面索引
+ * @nr_pages:	最大页面数
+ * @pages:	存放找到的页面的数组
+ *
+ * find_get_pages_contig() 的工作方式与 find_get_pages() 相同，不同之处在于
+ * 它返回的页面数量是连续的。
+ *
+ * find_get_pages_contig() 返回找到的页面数量。
+ */
+
 unsigned find_get_pages_contig(struct address_space *mapping, pgoff_t index,
 			       unsigned int nr_pages, struct page **pages)
 {
-	unsigned int i;
-	unsigned int ret;
-	unsigned int nr_found;
+	unsigned int i;  // 循环变量
+	unsigned int ret;  // 返回的页面数量
+	unsigned int nr_found;  // 实际找到的页面数量
 
-	rcu_read_lock();
+	rcu_read_lock();	// 读取锁定，用于防止数据在读取时被修改
 restart:
+	// 使用 radix_tree_gang_lookup_slot 函数从 radix tree 中查找连续的页面
 	nr_found = radix_tree_gang_lookup_slot(&mapping->page_tree,
 				(void ***)pages, index, nr_pages);
-	ret = 0;
+	ret = 0;	// 初始化返回的页面数为0
+	// 遍历找到的页面
 	for (i = 0; i < nr_found; i++) {
-		struct page *page;
+		struct page *page;	// 单个页面的指针
 repeat:
+		// 解引用页面槽位
 		page = radix_tree_deref_slot((void **)pages[i]);
+		// 如果页面不存在，继续下一次循环
 		if (unlikely(!page))
 			continue;
 		/*
 		 * this can only trigger if nr_found == 1, making livelock
 		 * a non issue.
 		 */
+		// 检查页面是否标记为重试
 		if (unlikely(page == RADIX_TREE_RETRY))
-			goto restart;
+			goto restart;	// 如果是，重新开始
 
+		// 检查页面是否被移除或索引改变
 		if (page->mapping == NULL || page->index != index)
-			break;
+			break;	// 如果是，则跳出循环
 
+		// 尝试增加页面的引用计数
 		if (!page_cache_get_speculative(page))
-			goto repeat;
+			goto repeat;	// 如果失败，重试
 
 		/* Has the page moved? */
+		// 检查页面是否移动
 		if (unlikely(page != *((void **)pages[i]))) {
-			page_cache_release(page);
-			goto repeat;
+			page_cache_release(page);	// 释放页面引用
+			goto repeat;	 // 重试
 		}
 
-		pages[ret] = page;
-		ret++;
-		index++;
+		pages[ret] = page;	// 将页面存储到返回数组中
+		ret++;							// 增加返回的页面数量
+		index++;						// 移动到下一个页面索引
 	}
-	rcu_read_unlock();
-	return ret;
+	rcu_read_unlock();		// 解锁
+	return ret;						// 返回找到的页面数量
 }
 EXPORT_SYMBOL(find_get_pages_contig);
 
@@ -969,49 +1064,67 @@ EXPORT_SYMBOL(find_get_pages_contig);
  * Like find_get_pages, except we only return pages which are tagged with
  * @tag.   We update @index to index the next page for the traversal.
  */
+/**
+ * find_get_pages_tag - 查找并返回带有 @tag 标记的页面
+ * @mapping: 要搜索的地址空间
+ * @index: 开始搜索的页面索引
+ * @tag: 标记索引
+ * @nr_pages: 最大页面数量
+ * @post_now: 递归中指向结构体page的指针数组
+ *
+ * 类似于 find_get_pages，但我们只返回带有 @tag 标记的页面。
+ * 我们更新 @index 以索引遍历中的下一个页面。
+ */
 unsigned find_get_pages_tag(struct address_space *mapping, pgoff_t *index,
 			int tag, unsigned int nr_pages, struct page **pages)
 {
-	unsigned int i;
-	unsigned int ret;
-	unsigned int nr_found;
+	unsigned int i;  // 循环变量
+	unsigned int ret;  // 返回的页面数量
+	unsigned int nr_found;  // 实际找到的页面数量
 
-	rcu_read_lock();
+	rcu_read_lock();  // 获取读取锁定
 restart:
+	// 使用 radix_tree_gang_lookup_tag_slot 从 radix tree 中查找具有特定标记的页面
 	nr_found = radix_tree_gang_lookup_tag_slot(&mapping->page_tree,
 				(void ***)pages, *index, nr_pages, tag);
-	ret = 0;
+	ret = 0;	// 初始化返回的页面数为0
+	// 遍历找到的页面
 	for (i = 0; i < nr_found; i++) {
-		struct page *page;
+		struct page *page;	// 单个页面的指针
 repeat:
+		// 解引用页面槽位
 		page = radix_tree_deref_slot((void **)pages[i]);
 		if (unlikely(!page))
-			continue;
+			continue;	// 如果页面不存在，继续下一次循环
 		/*
 		 * this can only trigger if nr_found == 1, making livelock
 		 * a non issue.
 		 */
+		// 检查页面是否标记为重试
 		if (unlikely(page == RADIX_TREE_RETRY))
-			goto restart;
+			goto restart;	// 如果是，重新开始
 
+		// 尝试增加页面的引用计数
 		if (!page_cache_get_speculative(page))
-			goto repeat;
+			goto repeat;	// 如果失败，重试
 
 		/* Has the page moved? */
+		// 检查页面是否移动
 		if (unlikely(page != *((void **)pages[i]))) {
-			page_cache_release(page);
-			goto repeat;
+			page_cache_release(page);	// 释放页面引用
+			goto repeat;	// 重试
 		}
 
-		pages[ret] = page;
-		ret++;
-	}
-	rcu_read_unlock();
+		pages[ret] = page;	// 将页面存储到返回数组中
+		ret++;			// 增加返回的页面数量
+	}	
+	rcu_read_unlock();	// 解锁
 
+	// 更新 index 以指向下一个要搜索的页面
 	if (ret)
 		*index = pages[ret - 1]->index + 1;
 
-	return ret;
+	return ret;	// 更新 index 以指向下一个要搜索的页面
 }
 EXPORT_SYMBOL(find_get_pages_tag);
 
@@ -1028,21 +1141,36 @@ EXPORT_SYMBOL(find_get_pages_tag);
  * Clear __GFP_FS when allocating the page to avoid recursion into the fs
  * and deadlock against the caller's locked page.
  */
+/**
+ * grab_cache_page_nowait - 返回给定缓存中给定索引的锁定页面
+ * @mapping: 目标地址空间
+ * @index: 页面索引
+ *
+ * 与 grab_cache_page() 相同，但如果页面不可用则不等待。
+ * 这适用于推测性数据生成器，其中如果无法获取页面，则可以重新生成数据。
+ * 在持有另一个页面的锁的同时调用此例程应该是安全的。
+ *
+ * 在分配页面时清除 __GFP_FS 以避免递归进入文件系统并与调用者锁定的页面死锁。
+ */
 struct page *
 grab_cache_page_nowait(struct address_space *mapping, pgoff_t index)
 {
+	// 尝试查找页面
 	struct page *page = find_get_page(mapping, index);
 
-	if (page) {
+	if (page) {	// 如果页面存在
+		// 尝试锁定页面
 		if (trylock_page(page))
-			return page;
-		page_cache_release(page);
-		return NULL;
+			return page;	// 如果成功，返回该页面
+		page_cache_release(page);	// 如果锁定失败，释放页面
+		return NULL;	// 返回 NULL
 	}
+	// 如果页面不存在，尝试分配一个新页面，注意 __GFP_FS 被清除以防止递归和死锁
 	page = __page_cache_alloc(mapping_gfp_mask(mapping) & ~__GFP_FS);
+	// 尝试将新页面添加到 LRU 和缓存中
 	if (page && add_to_page_cache_lru(page, mapping, index, GFP_NOFS)) {
-		page_cache_release(page);
-		page = NULL;
+		page_cache_release(page);	// 如果添加失败，释放页面
+		page = NULL;	// 设置页面为 NULL
 	}
 	return page;
 }
@@ -2488,6 +2616,16 @@ EXPORT_SYMBOL(grab_cache_page_write_begin);
 static ssize_t generic_perform_write(struct file *file,
 				struct iov_iter *i, loff_t pos)
 {
+	/**
+	 * page = __grab_cache_page(mapping, index, &cached_page, &lru_prev);
+	 * status = a_ops->prepare_write(file, page, offset, offset + bytes);
+	 * page_fault = filemap_copy_from_user(page, offset, buf, bytes);
+	 * status = a_ops->commit_write(file, page, offset, offset + bytes);
+	 * 在高速缓存查找需要的页。如果页不在高速缓存，则在高速缓存中新分配一个空闲项；
+	 * 接下来，创建一个写请求；接着数据从用户空间缓冲区拷贝到内核缓冲区；
+	 * 最后将数据写入磁盘
+	 */
+
 	// 获取文件的地址空间
 	struct address_space *mapping = file->f_mapping;
 	// 地址空间操作集

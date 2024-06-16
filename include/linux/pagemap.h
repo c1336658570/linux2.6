@@ -239,26 +239,38 @@ typedef int filler_t(void *, struct page *);
 // mapping是指定地址空间，offset是文件中的指定位置，以页面为单位
 extern struct page * find_get_page(struct address_space *mapping,
 				pgoff_t index);
+// find_lock_page 函数，和 find_get_page 类似，但返回的页面会被锁定。
 extern struct page * find_lock_page(struct address_space *mapping,
 				pgoff_t index);
+// find_or_create_page 函数，寻找或创建一个页面。如果页面不存在，则根据 gfp_mask 参数的规定分配新的页面。
 extern struct page * find_or_create_page(struct address_space *mapping,
 				pgoff_t index, gfp_t gfp_mask);
+// find_get_pages 函数，获取一系列连续页面，返回找到的页面数。
 unsigned find_get_pages(struct address_space *mapping, pgoff_t start,
 			unsigned int nr_pages, struct page **pages);
+// find_get_pages_contig 函数，功能与 find_get_pages 类似，但它保证返回的页面在物理内存中也是连续的。
 unsigned find_get_pages_contig(struct address_space *mapping, pgoff_t start,
 			       unsigned int nr_pages, struct page **pages);
+// find_get_pages_tag 函数，根据特定的标记来查找页面，返回找到的页面数。
 unsigned find_get_pages_tag(struct address_space *mapping, pgoff_t *index,
 			int tag, unsigned int nr_pages, struct page **pages);
 
+// grab_cache_page_write_begin 函数，获取并锁定用于写入的缓存页面。
 struct page *grab_cache_page_write_begin(struct address_space *mapping,
 			pgoff_t index, unsigned flags);
 
 /*
  * Returns locked page at given index in given cache, creating it if needed.
  */
+/*
+ * Returns locked page at given index in given cache, creating it if needed.
+ * 返回指定缓存中给定索引的锁定页面，如有必要会创建它。
+ */
+// grab_cache_page 函数，尝试获取并锁定一个页面，如果页面不存在则创建它。
 static inline struct page *grab_cache_page(struct address_space *mapping,
 								pgoff_t index)
 {
+	// 使用地址空间的 GFP 掩码调用 find_or_create_page，尝试获取或创建页面。
 	return find_or_create_page(mapping, index, mapping_gfp_mask(mapping));
 }
 
@@ -487,28 +499,40 @@ static inline int fault_in_pages_readable(const char __user *uaddr, int size)
 	return ret;
 }
 
+// 定义函数 add_to_page_cache_locked，其将页面添加到页面缓存中，并锁定该页面。
 int add_to_page_cache_locked(struct page *page, struct address_space *mapping,
 				pgoff_t index, gfp_t gfp_mask);
 // 通过page_cache_alloc_cold函数分配一个新页面，然后调用add_to_page_cache_lru将其加入到页面调整缓存。
 int add_to_page_cache_lru(struct page *page, struct address_space *mapping,
 				pgoff_t index, gfp_t gfp_mask);
+// 声明函数 remove_from_page_cache，其从页面缓存中移除指定页面。
 extern void remove_from_page_cache(struct page *page);
+// 声明函数 __remove_from_page_cache，其直接从页面缓存中移除指定页面。
 extern void __remove_from_page_cache(struct page *page);
 
 /*
  * Like add_to_page_cache_locked, but used to add newly allocated pages:
  * the page is new, so we can just run __set_page_locked() against it.
  */
+/*
+ * 类似于 add_to_page_cache_locked，但用于添加新分配的页面：
+ * 页面是新的，因此我们可以直接对其执行 __set_page_locked() 操作。
+ */
+// 定义内联函数 add_to_page_cache，用于将新分配的页面添加到页面缓存中。
 static inline int add_to_page_cache(struct page *page,
 		struct address_space *mapping, pgoff_t offset, gfp_t gfp_mask)
 {
 	int error;
 
+	// 锁定页面，防止其他操作影响此页面。
 	__set_page_locked(page);
+	// 尝试将页面添加到页面缓存，并锁定它。
 	error = add_to_page_cache_locked(page, mapping, offset, gfp_mask);
+	// 检查添加页面是否出现错误。
 	if (unlikely(error))
+		// 如果添加失败，则解锁页面。
 		__clear_page_locked(page);
-	return error;
+	return error;	// 返回操作结果，如果成功则为0，否则为错误代码。
 }
 
 #endif /* _LINUX_PAGEMAP_H */

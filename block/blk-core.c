@@ -604,9 +604,34 @@ EXPORT_SYMBOL(blk_alloc_queue_node);
  *    blk_init_queue() must be paired with a blk_cleanup_queue() call
  *    when the block device is deactivated (such as at module unload).
  **/
+/**
+ * blk_init_queue  - 为块设备准备一个请求队列
+ * @rfn: 将被调用以处理已放置在队列上的请求的函数。
+ * @lock: 请求队列的自旋锁
+ *
+ * 描述:
+ *    如果块设备希望使用标准的请求处理程序，即对请求排序并合并相邻请求，
+ *    则必须调用 blk_init_queue()。函数 @rfn 将在队列上有需要处理的请求时被调用。
+ *    如果设备支持插入（plugging），则当队列上有可用请求时，@rfn 可能不会立即被调用，
+ *    而可能稍后被调用。当队列上的一个请求所属的缓冲区需要使用时，或由于内存压力，
+ *    通常会取消插入（unplug）队列。
+ *
+ *    @rfn 不需要也不期望从队列中移除所有请求，而只是尽可能多地处理它能处理的请求。
+ *    如果它确实留下了队列上的请求，它负责安排这些请求最终得到处理。
+ *
+ *    在操作请求队列上的请求时必须持有队列自旋锁；此锁也将从中断上下文中获取，
+ *    因此需要禁用中断。
+ *
+ *    函数返回初始化后的请求队列指针，如果初始化失败则返回 %NULL。
+ *
+ * 注意:
+ *    blk_init_queue() 必须与 blk_cleanup_queue() 配对调用，
+ *    当块设备停用时（如在模块卸载时）。
+ **/
 
 struct request_queue *blk_init_queue(request_fn_proc *rfn, spinlock_t *lock)
 {
+	// 调用带节点 ID 的初始化函数
 	return blk_init_queue_node(rfn, lock, -1);
 }
 EXPORT_SYMBOL(blk_init_queue);
@@ -614,40 +639,56 @@ EXPORT_SYMBOL(blk_init_queue);
 struct request_queue *
 blk_init_queue_node(request_fn_proc *rfn, spinlock_t *lock, int node_id)
 {
+	// 分配请求队列结构
 	struct request_queue *q = blk_alloc_queue_node(GFP_KERNEL, node_id);
 
+	// 分配失败，返回NULL
 	if (!q)
 		return NULL;
 
+	// 设置节点 ID
 	q->node = node_id;
+	// 初始化队列的空闲列表
 	if (blk_init_free_list(q)) {
+		// 初始化失败，释放队列结构
 		kmem_cache_free(blk_requestq_cachep, q);
 		return NULL;
 	}
 
-	q->request_fn		= rfn;
-	q->prep_rq_fn		= NULL;
-	q->unplug_fn		= generic_unplug_device;
-	q->queue_flags		= QUEUE_FLAG_DEFAULT;
-	q->queue_lock		= lock;
+	q->request_fn		= rfn; // 设置处理请求的函数
+	q->prep_rq_fn		= NULL; // 准备请求函数设置为 NULL
+	q->unplug_fn		= generic_unplug_device; // 设置通用的取消插入函数
+	q->queue_flags		= QUEUE_FLAG_DEFAULT; // 设置队列标志为默认值
+	q->queue_lock		= lock; // 设置队列锁
+
 
 	/*
 	 * This also sets hw/phys segments, boundary and size
 	 */
+	/*
+	 * 这同样设置了硬件/物理段、边界和大小
+	 */
+	// 设置请求处理函数
 	blk_queue_make_request(q, __make_request);
 
+	// 为散列列表(reserved scatter list)预留的大小设置为最大
 	q->sg_reserved_size = INT_MAX;
 
 	/*
 	 * all done
 	 */
+	/*
+	 * 所有设置完成
+	 */
+	// 初始化 IO 调度器
 	if (!elevator_init(q, NULL)) {
+		// 设置队列的拥塞阈值
 		blk_queue_congestion_threshold(q);
-		return q;
+		return q;	// 返回初始化完成的请求队列
 	}
 
-	blk_put_queue(q);
-	return NULL;
+	blk_put_queue(q);	// 初始化失败，释放请求队列
+	return NULL;			// 返回 NULL
 }
 EXPORT_SYMBOL(blk_init_queue_node);
 

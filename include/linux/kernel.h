@@ -97,6 +97,7 @@ extern const char linux_proc_banner[];
  */
 #define lower_32_bits(n) ((u32)(n))
 
+// 打印的等级
 #define	KERN_EMERG	"<0>"	/* system is unusable			*/
 #define	KERN_ALERT	"<1>"	/* action must be taken immediately	*/
 #define	KERN_CRIT	"<2>"	/* critical conditions			*/
@@ -118,6 +119,7 @@ extern const char linux_proc_banner[];
 extern int console_printk[];
 
 #define console_loglevel (console_printk[0])
+// 默认的打印等级
 #define default_message_loglevel (console_printk[1])
 #define minimum_console_loglevel (console_printk[2])
 #define default_console_loglevel (console_printk[3])

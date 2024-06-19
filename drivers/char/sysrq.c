@@ -12,6 +12,8 @@
  *	based upon discusions in irc://irc.openprojects.net/#kernelnewbies
  */
 
+// sysrq相关代码
+
 #include <linux/sched.h>
 #include <linux/interrupt.h>
 #include <linux/mm.h>

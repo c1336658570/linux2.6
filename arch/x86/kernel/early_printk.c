@@ -164,6 +164,7 @@ static struct console early_serial_console = {
 static struct console *early_console = &early_vga_console;
 static int __initdata early_console_initialized;
 
+// 早期的printk，这个函数在启动过程就具有在终端打印的能力
 asmlinkage void early_printk(const char *fmt, ...)
 {
 	char buf[512];

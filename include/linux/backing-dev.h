@@ -133,7 +133,7 @@ struct backing_dev_info {
 	/* 保护wb_list更新的锁 */
 	spinlock_t wb_lock;	  /* protects update side of wb_list */
 	/* 挂在这个bdi下的刷新线程 */
-	// 该设备下的bid_writeback链表
+	// 该设备下的bdi_writeback链表
 	struct list_head wb_list; /* the flusher threads hanging off this bdi */
 	/* 已注册任务的位掩码 */
 	unsigned long wb_mask;	  /* bitmask of registered tasks */

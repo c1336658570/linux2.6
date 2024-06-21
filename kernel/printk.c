@@ -55,19 +55,27 @@ void asmlinkage __attribute__((weak)) early_printk(const char *fmt, ...)
 #define __LOG_BUF_LEN	(1 << CONFIG_LOG_BUF_SHIFT)
 
 /* printk's without a loglevel use this.. */
+/* 如果printk调用中没有指定日志级别，则使用以下默认级别 */
 // 默认的打印等级
 #define DEFAULT_MESSAGE_LOGLEVEL 4 /* KERN_WARNING */
 
 /* We show everything that is MORE important than this.. */
+/* 我们展示所有比这个更重要的消息 */
+/* 我们允许人们使用的最低日志等级 */
 #define MINIMUM_CONSOLE_LOGLEVEL 1 /* Minimum loglevel we let people use */
+/* 任何比KERN_DEBUG更严重的内容 */
 #define DEFAULT_CONSOLE_LOGLEVEL 7 /* anything MORE serious than KERN_DEBUG */
 
 DECLARE_WAIT_QUEUE_HEAD(log_wait);
 
 int console_printk[4] = {
+	/* 当前控制台日志等级 */
 	DEFAULT_CONSOLE_LOGLEVEL,	/* console_loglevel */
+	/* 默认的消息日志等级 */
 	DEFAULT_MESSAGE_LOGLEVEL,	/* default_message_loglevel */
+	/* 控制台的最低日志等级 */
 	MINIMUM_CONSOLE_LOGLEVEL,	/* minimum_console_loglevel */
+	/* 控制台的默认日志等级 */
 	DEFAULT_CONSOLE_LOGLEVEL,	/* default_console_loglevel */
 };
 

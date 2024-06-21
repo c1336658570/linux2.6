@@ -35,7 +35,8 @@
 
 struct device;
 
-struct miscdevice  {
+// 杂项设备，实际上是一个简单的字符设备。 杂项设备能使驱动开发者很容易地表示一个简单设备。
+struct miscdevice {
 	int minor;
 	const char *name;
 	const struct file_operations *fops;

@@ -89,37 +89,67 @@ extern const char linux_proc_banner[];
  * the "right shift count >= width of type" warning when that quantity is
  * 32-bits.
  */
+/**
+ * upper_32_bits - 返回一个数的32-63位
+ * @n: 我们正在访问的数字
+ *
+ * 对一个64位或32位数量进行右移操作。当该数量是32位时，使用此函数可以避免
+ * “右移位数 >= 类型宽度”的警告。
+ */
 #define upper_32_bits(n) ((u32)(((n) >> 16) >> 16))
 
 /**
  * lower_32_bits - return bits 0-31 of a number
  * @n: the number we're accessing
  */
+/**
+ * lower_32_bits - 返回一个数的0-31位
+ * @n: 我们正在访问的数字
+ */
 #define lower_32_bits(n) ((u32)(n))
 
-#define	KERN_EMERG	"<0>"	/* system is unusable			*/
-#define	KERN_ALERT	"<1>"	/* action must be taken immediately	*/
-#define	KERN_CRIT	"<2>"	/* critical conditions			*/
-#define	KERN_ERR	"<3>"	/* error conditions			*/
-#define	KERN_WARNING	"<4>"	/* warning conditions			*/
-#define	KERN_NOTICE	"<5>"	/* normal but significant condition	*/
-#define	KERN_INFO	"<6>"	/* informational			*/
-#define	KERN_DEBUG	"<7>"	/* debug-level messages			*/
+// 打印的等级
+// 内核消息的日志级别定义
+/* 系统无法使用 */
+#define KERN_EMERG	"<0>"	/* system is unusable			*/
+/* 需立即采取行动 */
+#define KERN_ALERT	"<1>"	/* action must be taken immediately	*/
+/* 关键情况 */
+#define KERN_CRIT	"<2>"	/* critical conditions			*/
+/* 错误情况 */
+#define KERN_ERR	"<3>"	/* error conditions			*/
+/* 警告情况 */
+#define KERN_WARNING	"<4>"	/* warning conditions			*/
+/* 正常但重要的情况 */
+#define KERN_NOTICE	"<5>"	/* normal but significant condition	*/
+/* 信息性消息 */
+#define KERN_INFO	"<6>"	/* informational			*/
+/* 调试级别消息 */
+#define KERN_DEBUG	"<7>"	/* debug-level messages			*/
 
 /* Use the default kernel loglevel */
+/* 使用默认的内核日志级别 */
 #define KERN_DEFAULT	"<d>"
 /*
  * Annotation for a "continued" line of log printout (only done after a
  * line that had no enclosing \n). Only to be used by core/arch code
  * during early bootup (a continued line is not SMP-safe otherwise).
  */
+/*
+ * 用于续行的注释（仅在没有封闭换行符\n的行后使用）。
+ * 只能由核心/架构代码在早期启动时使用（否则续行在多处理器环境下不安全）。
+ */
 #define	KERN_CONT	"<c>"
 
 extern int console_printk[];
 
+// 控制台的当前日志等级
 #define console_loglevel (console_printk[0])
+// 默认的打印等级
 #define default_message_loglevel (console_printk[1])
+// 控制台的最小日志等级
 #define minimum_console_loglevel (console_printk[2])
+// 控制台的默认日志等级
 #define default_console_loglevel (console_printk[3])
 
 struct completion;

@@ -1045,35 +1045,56 @@ static inline bool over_bground_thresh(void)
  * older_than_this takes precedence over nr_to_write.  So we'll only write back
  * all dirty pages if they are all attached to "old" mappings.
  */
+/*
+ * 显式刷新或定期回写“旧”数据。
+ *
+ * 定义“旧”：当一个inode的页面首次变脏时，我们会在inode的地址空间中标记脏时间。
+ * 因此，这个定期回写代码仅遍历超级块的inode列表，回写那些比特定时间点更早的inode。
+ *
+ * 尝试每个dirty_writeback_interval执行一次。但如果一个回写事件
+ * 超过了一个dirty_writeback_interval时间间隔，那么留下一秒的间隙。
+ *
+ * older_than_this优先于nr_to_write。所以我们只会回写所有附加到“旧”映射的脏页面。
+ */
+// 声明wb_writeback函数，接收后备设备和回写参数
 static long wb_writeback(struct bdi_writeback *wb,
 			 struct wb_writeback_args *args)
 {
 	struct writeback_control wbc = {
-		.bdi			= wb->bdi,
-		.sb			= args->sb,
-		.sync_mode		= args->sync_mode,
-		.older_than_this	= NULL,
-		.for_kupdate		= args->for_kupdate,
-		.for_background		= args->for_background,
-		.range_cyclic		= args->range_cyclic,
+		.bdi			= wb->bdi,	// 后备设备信息
+		.sb			= args->sb,		// 超级块
+		.sync_mode		= args->sync_mode,	// 同步模式
+		.older_than_this	= NULL,	// 设定一个旧数据的时间点
+		.for_kupdate		= args->for_kupdate,	// 是否为kupdate风格的周期性回写
+		.for_background		= args->for_background,	// 是否为后台回写
+		.range_cyclic		= args->range_cyclic,	// 是否循环范围
 	};
-	unsigned long oldest_jif;
-	long wrote = 0;
-	struct inode *inode;
+	unsigned long oldest_jif;	// 用于存储最早的jiffies时间
+	long wrote = 0;	// 记录写回的页数
+	struct inode *inode;	// inode结构体指针
 
-	if (wbc.for_kupdate) {
+
+	if (wbc.for_kupdate) {	// 如果是为了周期性更新
+		// 设置旧数据的时间界限
+		// 设置older_than_this指向oldest_jif
 		wbc.older_than_this = &oldest_jif;
+		// 计算时间界限
+		// 计算最早的有效jiffies时间
 		oldest_jif = jiffies -
 				msecs_to_jiffies(dirty_expire_interval * 10);
 	}
+	// 如果不是循环范围
 	if (!wbc.range_cyclic) {
-		wbc.range_start = 0;
-		wbc.range_end = LLONG_MAX;
+		wbc.range_start = 0;	// 设置回写范围的起始
+		wbc.range_end = LLONG_MAX;	// 设置回写范围的结束
 	}
 
 	for (;;) {
 		/*
 		 * Stop writeback when nr_pages has been consumed
+		 */
+		/*
+		 * 当nr_pages用尽时停止回写
 		 */
 		if (args->nr_pages <= 0)
 			break;
@@ -1082,28 +1103,45 @@ static long wb_writeback(struct bdi_writeback *wb,
 		 * For background writeout, stop when we are below the
 		 * background dirty threshold
 		 */
+		/*
+		 * 对于后台回写，当我们低于背景脏阈值时停止
+		 */
 		if (args->for_background && !over_bground_thresh())
 			break;
 
 		wbc.more_io = 0;
+		// 设置本次最大回写页数
 		wbc.nr_to_write = MAX_WRITEBACK_PAGES;
+		// 跳过的页数
 		wbc.pages_skipped = 0;
+		// 执行回写操作
 		writeback_inodes_wb(wb, &wbc);
+		// 计算剩余未回写页数
 		args->nr_pages -= MAX_WRITEBACK_PAGES - wbc.nr_to_write;
+		// 累计已回写页数
 		wrote += MAX_WRITEBACK_PAGES - wbc.nr_to_write;
 
 		/*
 		 * If we consumed everything, see if we have more
+		 */
+		/*
+		 * 如果消耗了全部页面，检查是否还有更多
 		 */
 		if (wbc.nr_to_write <= 0)
 			continue;
 		/*
 		 * Didn't write everything and we don't have more IO, bail
 		 */
+		/*
+		 * 没有写完所有页面且没有更多IO，退出循环
+		 */
 		if (!wbc.more_io)
 			break;
 		/*
 		 * Did we write something? Try for more
+		 */
+		/*
+		 * 如果写了一些页面，尝试写更多
 		 */
 		if (wbc.nr_to_write < MAX_WRITEBACK_PAGES)
 			continue;
@@ -1112,16 +1150,20 @@ static long wb_writeback(struct bdi_writeback *wb,
 		 * become available for writeback. Otherwise
 		 * we'll just busyloop.
 		 */
-		spin_lock(&inode_lock);
-		if (!list_empty(&wb->b_more_io))  {
+		/*
+		 * 没有写入任何内容。等待一些inode可用于回写，否则我们将只是忙等。
+		 */
+		spin_lock(&inode_lock);	// 锁定inode
+		if (!list_empty(&wb->b_more_io))  {	// 如果还有更多inode需要IO处理
+			// 获取待处理的inode
 			inode = list_entry(wb->b_more_io.prev,
 						struct inode, i_list);
-			inode_wait_for_writeback(inode);
+			inode_wait_for_writeback(inode);	// 等待inode回写完成
 		}
-		spin_unlock(&inode_lock);
+		spin_unlock(&inode_lock);	// 解锁inode
 	}
 
-	return wrote;
+	return wrote;	// 返回写回的总页数
 }
 
 /*
@@ -1184,18 +1226,27 @@ static long wb_check_old_data_flush(struct bdi_writeback *wb)
 /*
  * Retrieve work items and do the writeback they describe
  */
+/*
+ * 检索工作项并执行它们所描述的回写
+ */
 long wb_do_writeback(struct bdi_writeback *wb, int force_wait)
 {
-	struct backing_dev_info *bdi = wb->bdi;
-	struct bdi_work *work;
-	long wrote = 0;
+	struct backing_dev_info *bdi = wb->bdi;	// 获取后备设备信息
+	struct bdi_work *work;	// 工作项变量
+	long wrote = 0;	// 已写入的数据量，初始化为0
 
+	// 循环获取下一个工作项，直到没有工作项
 	while ((work = get_next_work_item(bdi, wb)) != NULL) {
+		// 获取工作项的参数
 		struct wb_writeback_args args = work->args;
 
 		/*
 		 * Override sync mode, in case we must wait for completion
 		 */
+		/*
+		 * 在必须等待完成的情况下，覆盖同步模式
+		 */
+		// 如果强制等待，则设置同步模式为全部同步
 		if (force_wait)
 			work->args.sync_mode = args.sync_mode = WB_SYNC_ALL;
 
@@ -1203,15 +1254,24 @@ long wb_do_writeback(struct bdi_writeback *wb, int force_wait)
 		 * If this isn't a data integrity operation, just notify
 		 * that we have seen this work and we are now starting it.
 		 */
+		/*
+		 * 如果这不是数据完整性操作，仅通知我们已看到此工作并已开始执行它。
+		 */
+		// 如果同步模式为无同步，清除挂起的工作项
 		if (args.sync_mode == WB_SYNC_NONE)
 			wb_clear_pending(wb, work);
 
+		// 执行回写并累加写入的数据量
 		wrote += wb_writeback(wb, &args);
 
 		/*
 		 * This is a data integrity writeback, so only do the
 		 * notification when we have completed the work.
 		 */
+		/*
+		 * 这是一个数据完整性回写，因此只在完成工作后进行通知。
+		 */
+		// 如果同步模式为全部同步，清除挂起的工作项
 		if (args.sync_mode == WB_SYNC_ALL)
 			wb_clear_pending(wb, work);
 	}
@@ -1219,6 +1279,10 @@ long wb_do_writeback(struct bdi_writeback *wb, int force_wait)
 	/*
 	 * Check for periodic writeback, kupdated() style
 	 */
+	/*
+	 * 检查周期性回写，类似于kupdated()风格
+	 */
+	// 检查并处理旧数据的回写，累加写入的数据量
 	wrote += wb_check_old_data_flush(wb);
 
 	return wrote;
@@ -1228,33 +1292,48 @@ long wb_do_writeback(struct bdi_writeback *wb, int force_wait)
  * Handle writeback of dirty data for the device backed by this bdi. Also
  * wakes up periodically and does kupdated style flushing.
  */
+/*
+ * 处理设备后备的脏数据回写。此外，定期唤醒并执行kupdated风格的刷新。
+ */
 int bdi_writeback_task(struct bdi_writeback *wb)
 {
+	// 上一次活动的时间点，使用系统的jiffies计时
 	unsigned long last_active = jiffies;
+	// 初始化等待时间为最大无符号长整数
 	unsigned long wait_jiffies = -1UL;
-	long pages_written;
+	long pages_written;	// 已写入的页面数
 
+	// 如果内核线程不应该停止，则继续循环
 	while (!kthread_should_stop()) {
+		// 执行回写操作，并返回写入的页面数
 		pages_written = wb_do_writeback(wb, 0);
 
+		// 如果有页面写入，更新最后活动时间
 		if (pages_written)
 			last_active = jiffies;
 		else if (wait_jiffies != -1UL) {
-			unsigned long max_idle;
+			unsigned long max_idle;	// 最大闲置时间
 
 			/*
 			 * Longest period of inactivity that we tolerate. If we
 			 * see dirty data again later, the task will get
 			 * recreated automatically.
 			 */
+			/*
+			 * 我们容忍的最长不活跃期。如果我们稍后再次看到脏数据，任务将自动重新创建。
+			 */
+			// 计算最大闲置时间
 			max_idle = max(5UL * 60 * HZ, wait_jiffies);
+			// 如果当前时间超过了最后活动时间加最大闲置时间，退出循环
 			if (time_after(jiffies, max_idle + last_active))
 				break;
 		}
 
+		// 计算等待的jiffies数
 		wait_jiffies = msecs_to_jiffies(dirty_writeback_interval * 10);
+		// 设置可中断的超时等待
 		schedule_timeout_interruptible(wait_jiffies);
-		try_to_freeze();
+		try_to_freeze();	// 尝试冻结任务
 	}
 
 	return 0;
@@ -1264,36 +1343,46 @@ int bdi_writeback_task(struct bdi_writeback *wb)
  * Schedule writeback for all backing devices. This does WB_SYNC_NONE
  * writeback, for integrity writeback see bdi_sync_writeback().
  */
+/*
+ * 为所有后备设备安排回写。这是执行WB_SYNC_NONE模式的回写，对于完整性回写，请查看bdi_sync_writeback()。
+ */
 static void bdi_writeback_all(struct super_block *sb, long nr_pages)
 {
 	struct wb_writeback_args args = {
-		.sb		= sb,
-		.nr_pages	= nr_pages,
-		.sync_mode	= WB_SYNC_NONE,
+		.sb		= sb,	// 文件系统的超级块
+		.nr_pages	= nr_pages,	// 指定回写的页面数
+		.sync_mode	= WB_SYNC_NONE,	// 设置同步模式为不等待完成
 	};
-	struct backing_dev_info *bdi;
+	struct backing_dev_info *bdi;	// 后备设备信息的变量
 
-	rcu_read_lock();
+	rcu_read_lock();	// 开始RCU读锁保护
 
+	// 遍历后备设备列表
 	list_for_each_entry_rcu(bdi, &bdi_list, bdi_list) {
 		if (!bdi_has_dirty_io(bdi))
-			continue;
+			continue;	// 如果设备没有脏数据，则跳过
 
+		// 为有脏数据的设备安排回写任务
 		bdi_alloc_queue_work(bdi, &args);
 	}
 
-	rcu_read_unlock();
+	rcu_read_unlock();	// 释放RCU读锁
 }
 
 /*
  * Start writeback of `nr_pages' pages.  If `nr_pages' is zero, write back
  * the whole world.
  */
+/*
+ * 启动`nr_pages'页面的回写。如果`nr_pages'为零，回写所有页面。
+ */
 void wakeup_flusher_threads(long nr_pages)
 {
+	// 如果页面数为0，则计算全局脏页面和不稳定的NFS页面之和
 	if (nr_pages == 0)
 		nr_pages = global_page_state(NR_FILE_DIRTY) +
 				global_page_state(NR_UNSTABLE_NFS);
+	// 调用bdi_writeback_all函数开始回写
 	bdi_writeback_all(NULL, nr_pages);
 }
 

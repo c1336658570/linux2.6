@@ -27,24 +27,47 @@
  *	returns 0 in case of success and negative number in case of error.
  *	Returning SEQ_SKIP means "discard this element and move on".
  */
+/**
+ * seq_open - 初始化序列文件
+ * @file: 要初始化的文件
+ * @op: 描述序列的方法表
+ *
+ * seq_open() 设置 @file，将其与由 @op 描述的序列关联。
+ * @op->start() 设置迭代器并返回序列的第一个元素。
+ * @op->stop() 用于关闭迭代器。
+ * @op->next() 返回序列的下一个元素。
+ * @op->show() 将元素输出到缓冲区。
+ * 如果发生错误，->start() 和 ->next() 返回 ERR_PTR(error)。
+ * 在序列结束时它们返回 %NULL。
+ * ->show() 在成功时返回 0，在错误时返回负数。
+ * 返回 SEQ_SKIP 表示“放弃此元素并继续”。
+ */
+// seq_open函数定义：用于打开一个序列文件
 int seq_open(struct file *file, const struct seq_operations *op)
 {
+	// 获取文件的私有数据，此处用作seq_file结构
 	struct seq_file *p = file->private_data;
 
-	if (!p) {
+	if (!p) {	// 如果私有数据为空，表示需要新建seq_file结构
+		// 为seq_file结构分配内存
 		p = kmalloc(sizeof(*p), GFP_KERNEL);
-		if (!p)
-			return -ENOMEM;
+		if (!p)	// 如果内存分配失败
+			return -ENOMEM;	// 返回内存不足错误码
+		// 将新建的seq_file结构赋给文件的私有数据
 		file->private_data = p;
 	}
-	memset(p, 0, sizeof(*p));
-	mutex_init(&p->lock);
-	p->op = op;
+	memset(p, 0, sizeof(*p));	// 初始化seq_file结构的内存区域
+	mutex_init(&p->lock);			// 初始化互斥锁
+	p->op = op;	// 设置操作结构
 
 	/*
 	 * Wrappers around seq_open(e.g. swaps_open) need to be
 	 * aware of this. If they set f_version themselves, they
 	 * should call seq_open first and then set f_version.
+	 */
+	/*
+	 * 封装函数需要注意seq_open的使用（例如swaps_open）。如果它们设置了f_version，
+	 * 应该先调用seq_open然后再设置f_version。
 	 */
 	file->f_version = 0;
 
@@ -57,66 +80,85 @@ int seq_open(struct file *file, const struct seq_operations *op)
 	 * support pwrite() then that client will need to implement its own
 	 * file.open() which calls seq_open() and then sets FMODE_PWRITE.
 	 */
+	/*
+	 * seq_files支持lseek()和pread()。它们不实现write()，但出于历史原因，
+	 * 我们在这里清除FMODE_PWRITE标志。
+	 *
+	 * 如果seq_files的客户端a) 实现了file.write()并且b) 希望支持pwrite()，
+	 * 则该客户端需要实现自己的file.open()，调用seq_open()然后设置FMODE_PWRITE。
+	 */
+	// 清除文件模式中的FMODE_PWRITE位，表明不支持pwrite()
 	file->f_mode &= ~FMODE_PWRITE;
-	return 0;
+	return 0;	// 返回成功
 }
 EXPORT_SYMBOL(seq_open);
 
+// 函数traverse定义，用于遍历seq_file结构，并填充缓冲区
 static int traverse(struct seq_file *m, loff_t offset)
 {
-	loff_t pos = 0, index;
-	int error = 0;
-	void *p;
+	loff_t pos = 0, index; // pos记录当前位置，index用于记录条目索引
+	int error = 0; // 错误码，默认为0
+	void *p; // 通用指针，用于遍历
 
-	m->version = 0;
-	index = 0;
+	m->version = 0;	// 初始化版本号
+	index = 0;		// 初始化条目索引
+	// 初始化count和from为0，表示缓冲区从0开始且无数据
 	m->count = m->from = 0;
-	if (!offset) {
+	if (!offset) {	// 如果偏移量为0，即从头开始
+		// 设置序列文件的索引为当前索引
 		m->index = index;
-		return 0;
+		return 0;	// 直接返回0，无需处理
 	}
-	if (!m->buf) {
+	if (!m->buf) {	// 如果缓冲区未初始化
+		// 分配一个页面大小的缓冲区
 		m->buf = kmalloc(m->size = PAGE_SIZE, GFP_KERNEL);
-		if (!m->buf)
-			return -ENOMEM;
+		if (!m->buf)	// 如果分配失败
+			return -ENOMEM;	// 返回内存不足的错误
 	}
+	// 调用start操作，开始遍历
 	p = m->op->start(m, &index);
-	while (p) {
-		error = PTR_ERR(p);
-		if (IS_ERR(p))
-			break;
+	while (p) {	// 当节点有效时继续
+		error = PTR_ERR(p);	// 获取指针错误码
+		if (IS_ERR(p))	// 如果p是错误指针
+			break;	// 中断循环
+		// 调用show操作，处理当前节点
 		error = m->op->show(m, p);
-		if (error < 0)
-			break;
+		if (error < 0)	// 如果处理出错
+			break;	// 中断循环
+		// 如果返回了错误但不是负值（比如警告）
 		if (unlikely(error)) {
-			error = 0;
-			m->count = 0;
+			error = 0;	// 重置错误码
+			m->count = 0;	// 重置count，忽略当前输出
 		}
-		if (m->count == m->size)
-			goto Eoverflow;
+		if (m->count == m->size)	// 如果缓冲区已满
+			goto Eoverflow;	// 跳转到Eoverflow处理
+		// 如果当前位置加上count超过了偏移量
 		if (pos + m->count > offset) {
-			m->from = offset - pos;
-			m->count -= m->from;
-			m->index = index;
-			break;
+			m->from = offset - pos; // 计算from，确定输出起点
+			m->count -= m->from; // 调整count，确定输出数量
+			m->index = index; // 更新序列文件的索引
+			break; // 结束循环
 		}
-		pos += m->count;
-		m->count = 0;
-		if (pos == offset) {
-			index++;
-			m->index = index;
-			break;
+		pos += m->count;	// 累加pos，准备下一次迭代
+		m->count = 0;			// 重置count
+		if (pos == offset) {	// 如果位置刚好等于偏移量
+			index++;	// 索引递增
+			m->index = index;	// 更新序列文件的索引
+			break;	// 结束循环
 		}
+		// 获取下一个节点
 		p = m->op->next(m, p, &index);
 	}
-	m->op->stop(m, p);
-	m->index = index;
-	return error;
+	m->op->stop(m, p);	// 调用stop操作，结束遍历
+	m->index = index;		// 更新序列文件的索引
+	return error;				// 返回错误码
 
-Eoverflow:
-	m->op->stop(m, p);
-	kfree(m->buf);
+Eoverflow:	// 缓冲区溢出处理
+	m->op->stop(m, p);	// 先调用stop操作
+	kfree(m->buf);	// 释放原有缓冲区
+	// 重新分配大小加倍的缓冲区
 	m->buf = kmalloc(m->size <<= 1, GFP_KERNEL);
+	// 如果分配失败返回内存不足，否则返回需重试
 	return !m->buf ? -ENOMEM : -EAGAIN;
 }
 
@@ -129,29 +171,41 @@ Eoverflow:
  *
  *	Ready-made ->f_op->read()
  */
+/**
+ * seq_read - 序列文件的 ->read() 方法。
+ * @file: 要从中读取的文件
+ * @buf: 读取数据的缓冲区
+ * @size: 最大读取字节数
+ * @ppos: 文件中的当前位置
+ *
+ * 现成的 ->f_op->read() 方法
+ */
 ssize_t seq_read(struct file *file, char __user *buf, size_t size, loff_t *ppos)
 {
+	// 从文件中获取seq_file结构
 	struct seq_file *m = (struct seq_file *)file->private_data;
-	size_t copied = 0;
-	loff_t pos;
-	size_t n;
-	void *p;
-	int err = 0;
+	size_t copied = 0; // 已拷贝到用户空间的字节数
+	loff_t pos; // 本地偏移变量
+	size_t n; // 临时变量，用于计算拷贝长度
+	void *p; // 用于遍历的指针
+	int err = 0; // 错误代码
 
-	mutex_lock(&m->lock);
+	mutex_lock(&m->lock);	// 锁定seq_file结构，保证线程安全
 
 	/* Don't assume *ppos is where we left it */
+	// 如果当前位置不是预期的读取位置
 	if (unlikely(*ppos != m->read_pos)) {
-		m->read_pos = *ppos;
+		m->read_pos = *ppos;	// 更新读取位置
+		// 重新遍历直到不需要重试
 		while ((err = traverse(m, *ppos)) == -EAGAIN)
 			;
-		if (err) {
+		if (err) {	// 如果遍历过程中出现错误
 			/* With prejudice... */
-			m->read_pos = 0;
-			m->version = 0;
-			m->index = 0;
-			m->count = 0;
-			goto Done;
+			m->read_pos = 0; // 重置读取位置
+			m->version = 0; // 重置版本号
+			m->index = 0; // 重置索引
+			m->count = 0; // 重置计数器
+			goto Done; // 跳转到完成标签
 		}
 	}
 
@@ -166,107 +220,126 @@ ssize_t seq_read(struct file *file, char __user *buf, size_t size, loff_t *ppos)
 	 * It is convenient to have it as  part of structure to avoid the
 	 * need of passing another argument to all the seq_file methods.
 	 */
-	m->version = file->f_version;
+	/*
+	 * seq_file的op方法（m_start/m_stop/m_next）可能会基于file->f_version进行特殊操作或优化，
+	 * 所以我们将file->f_version传递给这些方法。
+	 * 
+	 * seq_file->version仅是f_version的副本，seq_file方法可以简单地将其视为文件版本。
+	 * 它在第一次复制进来，并在所有操作后复制出去。
+	 * 将其作为结构的一部分，可以避免向所有seq_file方法传递另一个参数。
+	 */
+	m->version = file->f_version;	// 将文件版本同步到seq_file结构
 	/* grab buffer if we didn't have one */
-	if (!m->buf) {
+	if (!m->buf) {	// 如果没有缓冲区
+		// 分配一页内存作为缓冲区
 		m->buf = kmalloc(m->size = PAGE_SIZE, GFP_KERNEL);
-		if (!m->buf)
-			goto Enomem;
+		if (!m->buf)		// 如果分配失败
+			goto Enomem;	// 跳转到内存不足处理
 	}
 	/* if not empty - flush it first */
-	if (m->count) {
-		n = min(m->count, size);
+	if (m->count) {	// 如果缓冲区中有数据
+		n = min(m->count, size);	// 计算本次可拷贝的最大长度
+		// 将数据拷贝到用户空间
 		err = copy_to_user(buf, m->buf + m->from, n);
-		if (err)
-			goto Efault;
-		m->count -= n;
-		m->from += n;
-		size -= n;
-		buf += n;
-		copied += n;
-		if (!m->count)
-			m->index++;
-		if (!size)
-			goto Done;
+		if (err)	// 如果拷贝出错
+			goto Efault;	// 跳转到错误处理
+		m->count -= n;	// 更新缓冲区中的剩余数据长度
+		m->from += n;		// 更新缓冲区的读取起始位置
+		size -= n;			// 更新剩余需要读取的长度
+		buf += n;				// 移动用户空间的缓冲区指针
+		copied += n;		// 更新已拷贝的总长度
+		if (!m->count)	// 如果缓冲区数据已经全部读取
+			m->index++;		// 移动到下一个记录
+		if (!size)			// 如果已经满足用户请求的长度
+			goto Done;		// 跳转到完成标签
 	}
 	/* we need at least one record in buffer */
-	pos = m->index;
+	pos = m->index;	// 设置当前索引
+	// 通过start操作初始化遍历
 	p = m->op->start(m, &pos);
 	while (1) {
-		err = PTR_ERR(p);
-		if (!p || IS_ERR(p))
-			break;
+		err = PTR_ERR(p);	// 获取指针错误
+		if (!p || IS_ERR(p))	// 如果指针无效或是错误指针
+			break;	// 跳出循环
+		// 调用show操作处理当前记录
 		err = m->op->show(m, p);
-		if (err < 0)
-			break;
-		if (unlikely(err))
-			m->count = 0;
-		if (unlikely(!m->count)) {
+		if (err < 0)	// 如果处理出现错误
+			break;	// 跳出循环
+		if (unlikely(err))	// 如果有错误但不致命
+			m->count = 0;			// 重置计数器，忽略当前输出
+		if (unlikely(!m->count)) {	// 如果没有有效数据
+			// 获取下一个记录
 			p = m->op->next(m, p, &pos);
-			m->index = pos;
-			continue;
+			m->index = pos;	// 更新索引
+			continue;	// 继续下一次循环
 		}
-		if (m->count < m->size)
-			goto Fill;
-		m->op->stop(m, p);
-		kfree(m->buf);
+		if (m->count < m->size)	// 如果缓冲区未满
+			goto Fill;	// 跳转到填充数据标签
+		m->op->stop(m, p);	// 调用stop操作停止遍历
+		kfree(m->buf);	// 释放缓冲区
+		// 重新分配更大的缓冲区
 		m->buf = kmalloc(m->size <<= 1, GFP_KERNEL);
-		if (!m->buf)
-			goto Enomem;
-		m->count = 0;
-		m->version = 0;
-		pos = m->index;
-		p = m->op->start(m, &pos);
+		if (!m->buf)	// 如果分配失败
+			goto Enomem;	// 跳转到内存不足处理
+		m->count = 0;		// 重置计数器
+		m->version = 0;	// 重置版本号
+		pos = m->index;	// 重置位置
+		p = m->op->start(m, &pos);	// 重新开始遍历
 	}
-	m->op->stop(m, p);
-	m->count = 0;
-	goto Done;
+	m->op->stop(m, p);	// 停止遍历
+	m->count = 0;				// 重置计数器
+	goto Done;					// 跳转到完成标签
 Fill:
 	/* they want more? let's try to get some more */
-	while (m->count < size) {
+	while (m->count < size) {	// 当缓冲区数据少于请求长度时
+		// 记录当前偏移
 		size_t offs = m->count;
-		loff_t next = pos;
+		loff_t next = pos;	// 记录下一个位置
+		// 获取下一个记录
 		p = m->op->next(m, p, &next);
-		if (!p || IS_ERR(p)) {
-			err = PTR_ERR(p);
-			break;
+		if (!p || IS_ERR(p)) {	// 如果指针无效或是错误指针
+			err = PTR_ERR(p);			// 获取错误码
+			break;		// 跳出循环
 		}
-		err = m->op->show(m, p);
+		err = m->op->show(m, p);	// 处理记录
+		// 如果缓冲区已满或有错误
 		if (m->count == m->size || err) {
-			m->count = offs;
-			if (likely(err <= 0))
-				break;
+			m->count = offs;	// 恢复之前的偏移
+			if (likely(err <= 0))	// 如果错误不是致命的
+				break;	// 跳出循环
 		}
-		pos = next;
+		pos = next;	// 更新位置
 	}
-	m->op->stop(m, p);
-	n = min(m->count, size);
-	err = copy_to_user(buf, m->buf, n);
-	if (err)
-		goto Efault;
-	copied += n;
-	m->count -= n;
-	if (m->count)
-		m->from = n;
+
+	m->op->stop(m, p); // 停止遍历
+	n = min(m->count, size); // 计算本次可拷贝的最大长度
+	err = copy_to_user(buf, m->buf, n); // 将数据拷贝到用户空间
+	if (err) // 如果拷贝出错
+		goto Efault; // 跳转到错误处理
+	copied += n; // 更新已拷贝的总长度
+	m->count -= n; // 更新缓冲区中的剩余数据长度
+	if (m->count) // 如果缓冲区中还有数据
+		m->from = n; // 更新缓冲区的读取起始位置
 	else
-		pos++;
-	m->index = pos;
+		pos++; // 否则移动到下一个记录
+	m->index = pos; // 更新索引
+
 Done:
-	if (!copied)
-		copied = err;
+	if (!copied)	// 如果没有数据被拷贝
+		copied = err;	// 返回错误码
 	else {
-		*ppos += copied;
-		m->read_pos += copied;
+		*ppos += copied;	// 更新文件偏移
+		m->read_pos += copied;	// 更新读取位置
 	}
-	file->f_version = m->version;
-	mutex_unlock(&m->lock);
-	return copied;
+	file->f_version = m->version;	// 同步版本号到文件
+	mutex_unlock(&m->lock);	// 解锁
+	return copied;		// 返回拷贝的字节数
 Enomem:
-	err = -ENOMEM;
-	goto Done;
+	err = -ENOMEM;		// 设置内存不足错误码
+	goto Done;				// 跳转到完成标签
 Efault:
-	err = -EFAULT;
-	goto Done;
+	err = -EFAULT;		// 设置拷贝错误码
+	goto Done;				// 跳转到完成标签
 }
 EXPORT_SYMBOL(seq_read);
 
@@ -278,6 +351,15 @@ EXPORT_SYMBOL(seq_read);
  *
  *	Ready-made ->f_op->llseek()
  */
+/**
+ * seq_lseek - 序列文件的 ->llseek() 方法。
+ * @file: 相关文件
+ * @offset: 新位置
+ * @origin: 如果是0表示绝对位置，如果是1表示相对位置
+ *
+ * 现成的 ->f_op->llseek() 方法
+ */
+
 loff_t seq_lseek(struct file *file, loff_t offset, int origin)
 {
 	struct seq_file *m = (struct seq_file *)file->private_data;

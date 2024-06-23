@@ -111,20 +111,28 @@ extern const char linux_proc_banner[];
 // 打印的等级
 // 内核消息的日志级别定义
 /* 系统无法使用 */
+// 一个紧急情况
 #define KERN_EMERG	"<0>"	/* system is unusable			*/
 /* 需立即采取行动 */
+// 一个需要立即被注意到的错误
 #define KERN_ALERT	"<1>"	/* action must be taken immediately	*/
 /* 关键情况 */
+// 一个临界情况
 #define KERN_CRIT	"<2>"	/* critical conditions			*/
 /* 错误情况 */
+// 一个错误
 #define KERN_ERR	"<3>"	/* error conditions			*/
 /* 警告情况 */
+// 一个警告
 #define KERN_WARNING	"<4>"	/* warning conditions			*/
 /* 正常但重要的情况 */
+// 一个普通的，不过也可能需要注意的情况
 #define KERN_NOTICE	"<5>"	/* normal but significant condition	*/
 /* 信息性消息 */
+//一条非正式消息
 #define KERN_INFO	"<6>"	/* informational			*/
 /* 调试级别消息 */
+// 一个调试信息
 #define KERN_DEBUG	"<7>"	/* debug-level messages			*/
 
 /* Use the default kernel loglevel */

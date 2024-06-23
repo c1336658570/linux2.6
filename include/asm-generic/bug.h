@@ -39,14 +39,27 @@ struct bug_entry {
  * really the *only* solution?  There are usually better options, where
  * users don't need to reboot ASAP and can mostly shut down cleanly.
  */
+/*
+ * 不要使用 BUG() 或 BUG_ON() 除非真的没有其他出路；
+ * 一个例子可能是在无法回退的操作中检测到数据结构损坏。
+ * 如果子系统能够以某种方式继续运行，哪怕功能减少，
+ * 那么它可能不值得使用 BUG()。
+ *
+ * 如果你想使用 BUG()，再次思考：完全放弃真的是*唯一*的解决方案吗？
+ * 通常有更好的选择，用户不需要立即重启，并且可以大致上干净地关闭。
+ */
+// 如果没有定义 HAVE_ARCH_BUG，则定义 BUG() 宏
 #ifndef HAVE_ARCH_BUG
 #define BUG() do { \
+	/* 在控制台打印出错信息，包括文件名、行号和函数名 */ \
 	printk("BUG: failure at %s:%d/%s()!\n", __FILE__, __LINE__, __func__); \
+	/* 调用 panic() 函数，产生内核崩溃，停止系统运行 */ \
 	panic("BUG!"); \
 } while (0)
 #endif
 
 #ifndef HAVE_ARCH_BUG_ON
+// 如果没有定义 HAVE_ARCH_BUG_ON，则定义 BUG_ON() 宏
 #define BUG_ON(condition) do { if (unlikely(condition)) BUG(); } while(0)
 #endif
 

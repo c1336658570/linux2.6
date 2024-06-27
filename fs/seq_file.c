@@ -359,40 +359,48 @@ EXPORT_SYMBOL(seq_read);
  *
  * 现成的 ->f_op->llseek() 方法
  */
-
+// seq_lseek函数定义：实现文件的lseek操作，用于定位序列文件的读取位置
 loff_t seq_lseek(struct file *file, loff_t offset, int origin)
 {
+	// 从文件中获取seq_file结构
 	struct seq_file *m = (struct seq_file *)file->private_data;
+	// 初始化返回值为无效参数错误
 	loff_t retval = -EINVAL;
 
-	mutex_lock(&m->lock);
+	mutex_lock(&m->lock);	// 锁定seq_file结构，保证线程安全
+	// 将文件版本同步到seq_file结构
 	m->version = file->f_version;
+	// 根据移动文件指针的起点进行不同处理
 	switch (origin) {
-		case 1:
-			offset += file->f_pos;
-		case 0:
-			if (offset < 0)
+		case 1:	// SEEK_CUR：当前位置基础上偏移
+			offset += file->f_pos;	// 计算新的偏移位置
+		case 0:	// SEEK_SET：文件开始处偏移
+			if (offset < 0)	// 如果偏移量为负，则退出
 				break;
-			retval = offset;
+			retval = offset;	// 预设返回值为新的偏移量
+			// 如果新偏移量与当前读取位置不同
 			if (offset != m->read_pos) {
+				// 重新遍历直到不需要重试
 				while ((retval=traverse(m, offset)) == -EAGAIN)
 					;
-				if (retval) {
+				if (retval) {	// 如果遍历过程中出现错误
 					/* with extreme prejudice... */
-					file->f_pos = 0;
-					m->read_pos = 0;
-					m->version = 0;
-					m->index = 0;
-					m->count = 0;
+					file->f_pos = 0; // 重置文件位置
+					m->read_pos = 0; // 重置读取位置
+					m->version = 0; // 重置版本号
+					m->index = 0; // 重置索引
+					m->count = 0; // 重置计数器
 				} else {
+					// 更新读取位置为新偏移量
 					m->read_pos = offset;
+					// 更新文件位置，并设置返回值为新偏移量
 					retval = file->f_pos = offset;
 				}
 			}
 	}
-	file->f_version = m->version;
-	mutex_unlock(&m->lock);
-	return retval;
+	file->f_version = m->version;	// 同步版本号到文件
+	mutex_unlock(&m->lock);	// 解锁
+	return retval;	// 返回结果
 }
 EXPORT_SYMBOL(seq_lseek);
 
@@ -404,12 +412,21 @@ EXPORT_SYMBOL(seq_lseek);
  *	Frees the structures associated with sequential file; can be used
  *	as ->f_op->release() if you don't have private data to destroy.
  */
+/**
+ *	seq_release - 释放与序列文件关联的结构。
+ *	file: 相关的文件
+ *	inode: file->f_path.dentry->d_inode 文件的inode节点
+ *
+ *	释放与序列文件关联的结构；如果你没有私有数据需要销毁，
+ *	可以用作 ->f_op->release()。
+ */
 int seq_release(struct inode *inode, struct file *file)
 {
+	// 从文件中获取seq_file结构
 	struct seq_file *m = (struct seq_file *)file->private_data;
-	kfree(m->buf);
-	kfree(m);
-	return 0;
+	kfree(m->buf);	// 释放seq_file结构中的缓冲区
+	kfree(m);	// 释放seq_file结构本身
+	return 0;	// 返回0表示成功
 }
 EXPORT_SYMBOL(seq_release);
 
@@ -423,48 +440,71 @@ EXPORT_SYMBOL(seq_release);
  *	@esc with usual octal escape.  Returns 0 in case of success, -1 - in
  *	case of overflow.
  */
+/**
+ *	seq_escape - 将字符串打印到缓冲区中，对某些字符进行转义
+ *	m: 目标缓冲区
+ *	s: 字符串
+ *	esc: 需要转义的字符集
+ *
+ *	将字符串放入缓冲区，将 @esc 中的每个字符替换为常用的八进制转义序列。
+ *	成功返回0，缓冲区溢出返回-1。
+ */
 int seq_escape(struct seq_file *m, const char *s, const char *esc)
 {
+	// 计算缓冲区的结束位置
 	char *end = m->buf + m->size;
-        char *p;
-	char c;
+	char *p;	// 用于遍历缓冲区的指针
+	char c;		// 当前处理的字符
 
-        for (p = m->buf + m->count; (c = *s) != '\0' && p < end; s++) {
-		if (!strchr(esc, c)) {
-			*p++ = c;
+		// 遍历字符串s
+		for (p = m->buf + m->count; (c = *s) != '\0' && p < end; s++) {
+		if (!strchr(esc, c)) {	// 如果当前字符不需要转义
+			*p++ = c;	// 直接添加到缓冲区
 			continue;
 		}
-		if (p + 3 < end) {
-			*p++ = '\\';
-			*p++ = '0' + ((c & 0300) >> 6);
+		if (p + 3 < end) {	// 如果缓冲区有足够空间进行转义
+			*p++ = '\\';	// 添加转义符
+			*p++ = '0' + ((c & 0300) >> 6);	// 计算并添加字符的八进制表示
 			*p++ = '0' + ((c & 070) >> 3);
 			*p++ = '0' + (c & 07);
 			continue;
 		}
-		m->count = m->size;
-		return -1;
-        }
-	m->count = p - m->buf;
-        return 0;
+		m->count = m->size;	// 如果空间不足，设置count为size，表示缓冲区满
+		return -1;	// 返回-1表示溢出
+	}
+	m->count = p - m->buf;	// 更新count为已写入的字符数
+	return 0;	// 返回0表示成功
 }
 EXPORT_SYMBOL(seq_escape);
 
+/**
+ * seq_printf - 格式化输出字符串到序列文件
+ * m: 目标序列文件
+ * f: 格式化字符串
+ * ...: 可变参数列表
+ *
+ * 如果缓冲区有足够空间，按照格式化字符串和参数输出到序列文件。
+ * 成功返回0，失败（通常是因为缓冲区空间不足）返回-1。
+ */
 int seq_printf(struct seq_file *m, const char *f, ...)
 {
-	va_list args;
-	int len;
+	va_list args; // 定义可变参数列表
+	int len; // 输出的长度
 
+	// 如果缓冲区还有空间
 	if (m->count < m->size) {
+		// 初始化args指向第一个可变参数
 		va_start(args, f);
+		// 格式化输出到缓冲区
 		len = vsnprintf(m->buf + m->count, m->size - m->count, f, args);
-		va_end(args);
-		if (m->count + len < m->size) {
-			m->count += len;
-			return 0;
+		va_end(args);	// 结束可变参数的获取
+		if (m->count + len < m->size) {	// 如果输出后还有空间
+			m->count += len;	// 更新count
+			return 0;	// 返回0表示成功
 		}
 	}
-	m->count = m->size;
-	return -1;
+	m->count = m->size;	// 如果空间不足，设置count为size
+	return -1;	// 返回-1表示失败
 }
 EXPORT_SYMBOL(seq_printf);
 
@@ -479,24 +519,36 @@ EXPORT_SYMBOL(seq_printf);
  *      Returns pointer past last written character in @s, or NULL in case of
  *      failure.
  */
+/**
+ *	mangle_path - 修改并复制路径到缓冲区开始位置
+ *	s: 缓冲区起始位置
+ *	p: 在上述缓冲区中路径的开始位置
+ *	esc: 需要转义的字符集
+ *
+ *  从 @p 复制路径到 @s，替换 @esc 中的每个字符为常见的八进制转义。
+ *  返回指向 @s 中最后一个写入字符之后的指针，如果失败则返回 NULL。
+ */
 char *mangle_path(char *s, char *p, char *esc)
 {
-	while (s <= p) {
-		char c = *p++;
-		if (!c) {
-			return s;
-		} else if (!strchr(esc, c)) {
-			*s++ = c;
-		} else if (s + 4 > p) {
-			break;
+	while (s <= p) {	// 当输出位置在输入位置之前时继续
+		char c = *p++;	// 读取一个字符并移动指针
+		if (!c) {	// 如果字符是字符串结束符
+			return s;	// 返回当前位置（复制完成）
+		} else if (!strchr(esc, c)) {	// 如果字符不在转义列表中
+			*s++ = c;	// 直接复制字符
+		} else if (s + 4 > p) {	// 如果缓冲区剩余空间不足以存储转义序列
+			break;	// 终止循环
 		} else {
-			*s++ = '\\';
+			*s++ = '\\';	// 插入转义字符 '\\'
+			// 插入字符的高两位的八进制表示
 			*s++ = '0' + ((c & 0300) >> 6);
+			// 插入字符的中间三位的八进制表示
 			*s++ = '0' + ((c & 070) >> 3);
+			// 插入字符的低三位的八进制表示
 			*s++ = '0' + (c & 07);
 		}
 	}
-	return NULL;
+	return NULL;	// 如果循环因空间不足终止，返回 NULL
 }
 EXPORT_SYMBOL(mangle_path);
 
@@ -509,21 +561,32 @@ EXPORT_SYMBOL(mangle_path);
  * return the absolute path of 'path', as represented by the
  * dentry / mnt pair in the path parameter.
  */
+/**
+ * seq_path - 使用 seq_file 接口打印路径名
+ * m: seq_file 句柄
+ * path: 要打印的 struct path 结构体
+ * esc: 输出中需要转义的字符集
+ *
+ * 返回 'path' 的绝对路径，该路径由 path 参数中的 dentry / mnt 对表示。
+ */
 int seq_path(struct seq_file *m, struct path *path, char *esc)
 {
-	char *buf;
-	size_t size = seq_get_buf(m, &buf);
-	int res = -1;
+	char *buf; // 缓冲区指针
+	size_t size = seq_get_buf(m, &buf); // 获取缓冲区并返回大小
+	int res = -1; // 默认返回值设置为-1，表示失败
 
-	if (size) {
+	if (size) {	// 如果获取到了缓冲区
+		// 将路径转换为字符串形式
 		char *p = d_path(path, buf, size);
-		if (!IS_ERR(p)) {
+		if (!IS_ERR(p)) {	// 如果转换成功
+			// 修改路径，对需要转义的字符进行处理
 			char *end = mangle_path(buf, p, esc);
-			if (end)
+			if (end)	// 如果修改成功
+				// 计算结果字符串的长度
 				res = end - buf;
 		}
 	}
-	seq_commit(m, res);
+	seq_commit(m, res);	// 提交缓冲区内容
 
 	return res;
 }
@@ -534,195 +597,234 @@ EXPORT_SYMBOL(seq_path);
  *
  * root may be changed, see __d_path().
  */
+/*
+ * 与 seq_path 相同，但相对于提供的 root。
+ *
+ * root 可能会改变，参见 __d_path()。
+ */
 int seq_path_root(struct seq_file *m, struct path *path, struct path *root,
 		  char *esc)
 {
-	char *buf;
-	size_t size = seq_get_buf(m, &buf);
-	int res = -ENAMETOOLONG;
+	char *buf; // 缓冲区指针
+	size_t size = seq_get_buf(m, &buf); // 获取缓冲区并返回大小
+	int res = -ENAMETOOLONG; // 默认返回值设置为路径名过长
 
-	if (size) {
+	if (size) {	// 如果获取到了缓冲区
 		char *p;
 
-		spin_lock(&dcache_lock);
+		spin_lock(&dcache_lock);	// 加锁，防止数据竞态
+		// 获取相对于 root 的路径
 		p = __d_path(path, root, buf, size);
+		// 解锁
 		spin_unlock(&dcache_lock);
-		res = PTR_ERR(p);
-		if (!IS_ERR(p)) {
+		res = PTR_ERR(p);	// 获取错误码
+		if (!IS_ERR(p)) {	// 如果路径获取成功
+			// 修改路径，对需要转义的字符进行处理
 			char *end = mangle_path(buf, p, esc);
-			if (end)
-				res = end - buf;
+			if (end)	// 如果修改成功
+				res = end - buf;	// 计算结果字符串的长度
 			else
-				res = -ENAMETOOLONG;
+				res = -ENAMETOOLONG;	// 修改失败，返回路径名过长错误
 		}
 	}
-	seq_commit(m, res);
+	seq_commit(m, res);	// 提交缓冲区内容
 
-	return res < 0 ? res : 0;
+	return res < 0 ? res : 0;	// 如果有错误返回错误码，否则返回0
 }
 
 /*
  * returns the path of the 'dentry' from the root of its filesystem.
  */
+/**
+ * 返回从其文件系统根目录开始的 'dentry' 的路径。
+ */
 int seq_dentry(struct seq_file *m, struct dentry *dentry, char *esc)
 {
-	char *buf;
-	size_t size = seq_get_buf(m, &buf);
-	int res = -1;
+	char *buf; // 缓冲区指针
+	size_t size = seq_get_buf(m, &buf); // 获取缓冲区并返回大小
+	int res = -1; // 默认返回值设置为-1，表示失败
 
-	if (size) {
+	if (size) {	// 如果获取到了缓冲区
+		// 获取dentry的路径字符串
 		char *p = dentry_path(dentry, buf, size);
-		if (!IS_ERR(p)) {
+		if (!IS_ERR(p)) {	// 如果获取路径成功
+			// 对路径中需要转义的字符进行处理
 			char *end = mangle_path(buf, p, esc);
-			if (end)
-				res = end - buf;
+			if (end)	// 如果处理成功
+				res = end - buf;	// 计算处理后的路径长度
 		}
 	}
-	seq_commit(m, res);
+	seq_commit(m, res);	// 提交缓冲区内容
 
 	return res;
 }
 
+/**
+ * 将位图打印到 seq_file。
+ */
 int seq_bitmap(struct seq_file *m, const unsigned long *bits,
 				   unsigned int nr_bits)
 {
-	if (m->count < m->size) {
+	if (m->count < m->size) {	// 如果缓冲区还有空间
+		// 打印位图到缓冲区
 		int len = bitmap_scnprintf(m->buf + m->count,
 				m->size - m->count, bits, nr_bits);
-		if (m->count + len < m->size) {
-			m->count += len;
-			return 0;
+		if (m->count + len < m->size) {	// 如果打印后还有空间
+			m->count += len;	// 更新已使用的缓冲区长度
+			return 0;		// 返回0表示成功
 		}
 	}
-	m->count = m->size;
-	return -1;
+	m->count = m->size;	// 缓冲区空间不足，设置count为size
+	return -1;		// 返回-1表示失败
 }
 EXPORT_SYMBOL(seq_bitmap);
 
+/**
+ * 将位图以列表形式打印到 seq_file。
+ */
 int seq_bitmap_list(struct seq_file *m, const unsigned long *bits,
 		unsigned int nr_bits)
 {
-	if (m->count < m->size) {
+	if (m->count < m->size) {	// 如果缓冲区还有空间
+		// 以列表形式打印位图到缓冲区
 		int len = bitmap_scnlistprintf(m->buf + m->count,
 				m->size - m->count, bits, nr_bits);
-		if (m->count + len < m->size) {
-			m->count += len;
-			return 0;
+		if (m->count + len < m->size) {	// 如果打印后还有空间
+			m->count += len;	// 更新已使用的缓冲区长度
+			return 0;		// 返回0表示成功
 		}
 	}
-	m->count = m->size;
-	return -1;
+	m->count = m->size;	// 缓冲区空间不足，设置count为size
+	return -1;	// 返回-1表示失败
 }
 EXPORT_SYMBOL(seq_bitmap_list);
 
+// single_start: 用于开始序列文件的遍历，返回NULL表示没有内容或者已完成遍历。
 static void *single_start(struct seq_file *p, loff_t *pos)
 {
+	// 只在位置为0时返回非NULL（实际是1），表示有内容需要处理。
 	return NULL + (*pos == 0);
 }
 
+// single_next: 用于获取序列文件的下一条记录，在这种单条记录的情况下，始终返回NULL。
 static void *single_next(struct seq_file *p, void *v, loff_t *pos)
 {
-	++*pos;
-	return NULL;
+	++*pos;		// 增加位置索引
+	return NULL;	// 没有下一条记录
 }
 
+// single_stop: 结束遍历时的操作，这里没有任何操作。
 static void single_stop(struct seq_file *p, void *v)
 {
 }
 
+// single_open: 打开单条记录的序列文件。
 int single_open(struct file *file, int (*show)(struct seq_file *, void *),
 		void *data)
 {
+	// 分配序列操作结构
 	struct seq_operations *op = kmalloc(sizeof(*op), GFP_KERNEL);
-	int res = -ENOMEM;
+	int res = -ENOMEM;	// 默认返回内存不足错误
 
-	if (op) {
-		op->start = single_start;
-		op->next = single_next;
-		op->stop = single_stop;
-		op->show = show;
-		res = seq_open(file, op);
-		if (!res)
+	if (op) {	// 如果内存分配成功
+		op->start = single_start; // 设置开始函数
+		op->next = single_next; // 设置下一记录函数
+		op->stop = single_stop; // 设置结束函数
+		op->show = show; // 设置显示函数
+		res = seq_open(file, op); // 使用设置好的操作结构打开序列文件
+		if (!res)	// 如果打开成功
+			// 设置私有数据
 			((struct seq_file *)file->private_data)->private = data;
 		else
-			kfree(op);
+			kfree(op);	// 如果打开失败，释放操作结构内存
 	}
 	return res;
 }
 EXPORT_SYMBOL(single_open);
 
+// single_release: 释放单条记录的序列文件
 int single_release(struct inode *inode, struct file *file)
 {
+	// 获取序列操作结构
 	const struct seq_operations *op = ((struct seq_file *)file->private_data)->op;
-	int res = seq_release(inode, file);
-	kfree(op);
-	return res;
+	int res = seq_release(inode, file);	// 调用通用的释放函数
+	kfree(op);		// 释放序列操作结构
+	return res;		// 返回结果
 }
 EXPORT_SYMBOL(single_release);
 
+// seq_release_private: 释放带有私有数据的序列文件。
 int seq_release_private(struct inode *inode, struct file *file)
 {
-	struct seq_file *seq = file->private_data;
+	struct seq_file *seq = file->private_data;	// 获取序列文件结构
 
-	kfree(seq->private);
-	seq->private = NULL;
-	return seq_release(inode, file);
+	kfree(seq->private); // 释放私有数据
+	seq->private = NULL; // 将私有数据指针设置为NULL
+	return seq_release(inode, file); // 调用通用的释放函数
 }
 EXPORT_SYMBOL(seq_release_private);
 
+// 定义一个函数来打开序列文件，并为其分配私有数据空间。
 void *__seq_open_private(struct file *f, const struct seq_operations *ops,
 		int psize)
 {
-	int rc;
-	void *private;
+	int rc; // 用于存储返回代码
+	void *private; // 私有数据指针
 	struct seq_file *seq;
 
+	// 分配并清零指定大小的内存
 	private = kzalloc(psize, GFP_KERNEL);
-	if (private == NULL)
-		goto out;
+	if (private == NULL)	// 如果内存分配失败
+		goto out;	// 跳转到结束标签
 
-	rc = seq_open(f, ops);
-	if (rc < 0)
-		goto out_free;
+	rc = seq_open(f, ops);	// 调用seq_open来打开序列文件
+	if (rc < 0)		// 如果打开失败
+		goto out_free;	// 跳转到释放内存标签
 
-	seq = f->private_data;
-	seq->private = private;
-	return private;
+	seq = f->private_data; // 从文件结构中获取seq_file结构
+	seq->private = private; // 设置私有数据
+	return private; // 返回私有数据指针
 
 out_free:
-	kfree(private);
+	kfree(private);	// 释放已分配的内存
 out:
-	return NULL;
+	return NULL;		// 返回NULL表示失败
 }
 EXPORT_SYMBOL(__seq_open_private);
 
+// 一个简化版的seq_open，自动处理私有数据分配和释放。
 int seq_open_private(struct file *filp, const struct seq_operations *ops,
 		int psize)
 {
+	// 如果成功返回0，失败返回-ENOMEM
 	return __seq_open_private(filp, ops, psize) ? 0 : -ENOMEM;
 }
 EXPORT_SYMBOL(seq_open_private);
 
+// 向序列文件写入单个字符
 int seq_putc(struct seq_file *m, char c)
 {
+	// 如果缓冲区还有空间
 	if (m->count < m->size) {
+		// 将字符写入缓冲区并更新位置
 		m->buf[m->count++] = c;
-		return 0;
+		return 0;	// 返回0表示成功
 	}
-	return -1;
+	return -1;	// 返回-1表示缓冲区已满
 }
 EXPORT_SYMBOL(seq_putc);
 
+// 向序列文件写入字符串
 int seq_puts(struct seq_file *m, const char *s)
 {
-	int len = strlen(s);
-	if (m->count + len < m->size) {
-		memcpy(m->buf + m->count, s, len);
-		m->count += len;
-		return 0;
+	int len = strlen(s);	// 获取字符串长度
+	if (m->count + len < m->size) {	// 如果缓冲区足够大
+		memcpy(m->buf + m->count, s, len);	// 将字符串复制到缓冲区
+		m->count += len;	// 更新写入位置
+		return 0;	// 返回0表示成功
 	}
-	m->count = m->size;
-	return -1;
+	m->count = m->size;	// 如果空间不足，设置count为size
+	return -1;	// 返回-1表示失败
 }
 EXPORT_SYMBOL(seq_puts);
 
@@ -734,45 +836,81 @@ EXPORT_SYMBOL(seq_puts);
  *
  * Return 0 on success, non-zero otherwise.
  */
+/**
+ * seq_write - 向缓冲区写入任意数据
+ * seq: 指定要写入数据的缓冲区的seq_file
+ * data: 数据地址
+ * len: 字节数
+ *
+ * 成功返回0，否则返回非零。
+ */
 int seq_write(struct seq_file *seq, const void *data, size_t len)
 {
+	// 检查缓冲区是否有足够的空间
 	if (seq->count + len < seq->size) {
+		// 将数据复制到缓冲区
 		memcpy(seq->buf + seq->count, data, len);
-		seq->count += len;
-		return 0;
+		seq->count += len;	// 更新缓冲区中已使用的字节数
+		return 0;	// 成功时返回0
 	}
-	seq->count = seq->size;
-	return -1;
+	seq->count = seq->size;	// 如果空间不足，设置已使用字节数为缓冲区大小
+	return -1;	// 返回-1表示失败
 }
 EXPORT_SYMBOL(seq_write);
 
+/**
+ * 从链表头开始遍历链表
+ * head: 链表头
+ * pos: 开始位置的偏移量
+ *
+ * 返回链表中对应位置的元素，如果位置无效则返回NULL。
+ */
 struct list_head *seq_list_start(struct list_head *head, loff_t pos)
 {
 	struct list_head *lh;
 
+	// 遍历链表
 	list_for_each(lh, head)
-		if (pos-- == 0)
+		if (pos-- == 0)	// 当计数减至0时，返回当前元素
 			return lh;
 
-	return NULL;
+	return NULL;	// 如果遍历完成仍未找到，返回NULL
 }
 EXPORT_SYMBOL(seq_list_start);
 
+/**
+ * 从链表头开始或指定位置开始遍历链表
+ * head: 链表头
+ * pos: 开始位置的偏移量
+ *
+ * 如果pos为0，直接返回链表头；否则调用seq_list_start返回指定位置的元素。
+ */
 struct list_head *seq_list_start_head(struct list_head *head, loff_t pos)
 {
-	if (!pos)
-		return head;
+	if (!pos)	// 如果位置为0
+		return head;	// 直接返回链表头
 
+	// 否则调用seq_list_start获取前一个位置的元素
 	return seq_list_start(head, pos - 1);
 }
 EXPORT_SYMBOL(seq_list_start_head);
 
+/**
+ * 获取链表中的下一个元素
+ * v: 当前元素
+ * head: 链表头
+ * ppos: 位置指针
+ *
+ * 返回链表中的下一个元素，如果到达链表尾部则返回NULL。
+ */
 struct list_head *seq_list_next(void *v, struct list_head *head, loff_t *ppos)
 {
 	struct list_head *lh;
 
+	// 获取当前元素的下一个元素
 	lh = ((struct list_head *)v)->next;
-	++*ppos;
+	++*ppos;	// 位置增加
+	// 如果下一个元素是链表头，则表示遍历完成，返回NULL
 	return lh == head ? NULL : lh;
 }
 EXPORT_SYMBOL(seq_list_next);
@@ -784,14 +922,21 @@ EXPORT_SYMBOL(seq_list_next);
  *
  * Called at seq_file->op->start().
  */
+/**
+ * seq_hlist_start - 开始遍历哈希链表
+ * head: 哈希链表的头节点
+ * pos: 开始遍历的位置
+ *
+ * 该函数在 seq_file->op->start() 被调用。
+ */
 struct hlist_node *seq_hlist_start(struct hlist_head *head, loff_t pos)
 {
-	struct hlist_node *node;
+	struct hlist_node *node;	// 定义哈希链表节点指针
 
-	hlist_for_each(node, head)
-		if (pos-- == 0)
+	hlist_for_each(node, head)	// 遍历哈希链表
+		if (pos-- == 0)	// 当位置减到0时，返回当前节点
 			return node;
-	return NULL;
+	return NULL;			// 如果遍历完成仍未找到对应位置，返回NULL
 }
 EXPORT_SYMBOL(seq_hlist_start);
 
@@ -803,11 +948,19 @@ EXPORT_SYMBOL(seq_hlist_start);
  * Called at seq_file->op->start(). Call this function if you want to
  * print a header at the top of the output.
  */
+/**
+ * seq_hlist_start_head - 从哈希链表的头节点开始遍历
+ * head: 哈希链表的头节点
+ * pos: 开始遍历的位置
+ *
+ * 该函数在 seq_file->op->start() 被调用。如果你想在输出的顶部打印一个头部，调用这个函数。
+ */
 struct hlist_node *seq_hlist_start_head(struct hlist_head *head, loff_t pos)
 {
-	if (!pos)
-		return SEQ_START_TOKEN;
+	if (!pos)	// 如果位置为0
+		return SEQ_START_TOKEN;	// 返回一个特殊的开始标记
 
+	// 否则，调用seq_hlist_start获取前一个位置的节点
 	return seq_hlist_start(head, pos - 1);
 }
 EXPORT_SYMBOL(seq_hlist_start_head);
@@ -820,16 +973,25 @@ EXPORT_SYMBOL(seq_hlist_start_head);
  *
  * Called at seq_file->op->next().
  */
+/**
+ * seq_hlist_next - 移动到哈希链表的下一个位置
+ * v: 当前迭代器位置
+ * head: 哈希链表的头节点
+ * ppos: 当前位置
+ *
+ * 该函数在 seq_file->op->next() 被调用。
+ */
 struct hlist_node *seq_hlist_next(void *v, struct hlist_head *head,
 				  loff_t *ppos)
 {
+	// 从迭代器获取当前节点
 	struct hlist_node *node = v;
 
-	++*ppos;
-	if (v == SEQ_START_TOKEN)
-		return head->first;
+	++*ppos;	// 位置递增
+	if (v == SEQ_START_TOKEN)	// 如果当前位置是开始标记
+		return head->first;	// 返回链表的第一个节点
 	else
-		return node->next;
+		return node->next;	// 否则返回当前节点的下一个节点
 }
 EXPORT_SYMBOL(seq_hlist_next);
 
@@ -844,15 +1006,25 @@ EXPORT_SYMBOL(seq_hlist_next);
  * the _rcu list-mutation primitives such as hlist_add_head_rcu()
  * as long as the traversal is guarded by rcu_read_lock().
  */
+/**
+ * seq_hlist_start_rcu - 从RCU保护的哈希链表开始迭代
+ * head: 哈希链表的头节点
+ * pos: 序列的开始位置
+ *
+ * 在 seq_file->op->start() 调用此函数。
+ *
+ * 这个列表遍历原语可以安全地与 _rcu 列表修改原语（如 hlist_add_head_rcu()）
+ * 并发运行，只要遍历被 rcu_read_lock() 保护。
+ */
 struct hlist_node *seq_hlist_start_rcu(struct hlist_head *head,
 				       loff_t pos)
 {
 	struct hlist_node *node;
 
-	__hlist_for_each_rcu(node, head)
-		if (pos-- == 0)
+	__hlist_for_each_rcu(node, head)	// 使用 RCU 机制安全遍历链表
+		if (pos-- == 0)	// 当位置计数到0时返回当前节点
 			return node;
-	return NULL;
+	return NULL;	// 如果未找到节点，返回 NULL
 }
 EXPORT_SYMBOL(seq_hlist_start_rcu);
 
@@ -868,12 +1040,23 @@ EXPORT_SYMBOL(seq_hlist_start_rcu);
  * the _rcu list-mutation primitives such as hlist_add_head_rcu()
  * as long as the traversal is guarded by rcu_read_lock().
  */
+/**
+ * seq_hlist_start_head_rcu - 从RCU保护的哈希链表的头开始迭代
+ * head: 哈希链表的头节点
+ * pos: 序列的开始位置
+ *
+ * 在 seq_file->op->start() 调用此函数。如果你想在输出的顶部打印一个头部，调用这个函数。
+ *
+ * 这个列表遍历原语可以安全地与 _rcu 列表修改原语（如 hlist_add_head_rcu()）
+ * 并发运行，只要遍历被 rcu_read_lock() 保护。
+ */
 struct hlist_node *seq_hlist_start_head_rcu(struct hlist_head *head,
 					    loff_t pos)
 {
-	if (!pos)
-		return SEQ_START_TOKEN;
+	if (!pos)	// 如果位置为0
+		return SEQ_START_TOKEN;	// 返回一个特殊的开始标记
 
+	// 否则调用 seq_hlist_start_rcu 获取前一个位置的节点
 	return seq_hlist_start_rcu(head, pos - 1);
 }
 EXPORT_SYMBOL(seq_hlist_start_head_rcu);
@@ -890,16 +1073,29 @@ EXPORT_SYMBOL(seq_hlist_start_head_rcu);
  * the _rcu list-mutation primitives such as hlist_add_head_rcu()
  * as long as the traversal is guarded by rcu_read_lock().
  */
+/**
+ * seq_hlist_next_rcu - 移动到RCU保护的哈希链表的下一个位置
+ * v: 当前迭代器位置
+ * head: 哈希链表的头节点
+ * ppos: 当前位置
+ *
+ * 在 seq_file->op->next() 调用此函数。
+ *
+ * 这个列表遍历原语可以安全地与 _rcu 列表修改原语（如 hlist_add_head_rcu()）
+ * 并发运行，只要遍历被 rcu_read_lock() 保护。
+ */
 struct hlist_node *seq_hlist_next_rcu(void *v,
 				      struct hlist_head *head,
 				      loff_t *ppos)
 {
 	struct hlist_node *node = v;
 
-	++*ppos;
+	++*ppos;	// 位置递增
 	if (v == SEQ_START_TOKEN)
+		// 如果是开始标记，返回列表的第一个节点
 		return rcu_dereference(head->first);
 	else
+		// 否则返回下一个节点
 		return rcu_dereference(node->next);
 }
 EXPORT_SYMBOL(seq_hlist_next_rcu);

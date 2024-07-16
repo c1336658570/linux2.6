@@ -182,6 +182,7 @@
 
 #endif
 
+// 段选择符定义
 #define __KERNEL_CS	(GDT_ENTRY_KERNEL_CS * 8)
 #define __KERNEL_DS	(GDT_ENTRY_KERNEL_DS * 8)
 #define __USER_DS     (GDT_ENTRY_DEFAULT_USER_DS* 8 + 3)

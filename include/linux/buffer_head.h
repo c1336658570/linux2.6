@@ -288,12 +288,17 @@ void buffer_init(void);
 /*
  * inline definitions
  */
+/*
+ * 内联定义
+ */
 
+// 定义一个静态内联函数，用于将缓冲区头链表附加到特定的页面。
 static inline void attach_page_buffers(struct page *page,
 		struct buffer_head *head)
 {
-	page_cache_get(page);
-	SetPagePrivate(page);
+	page_cache_get(page);	// 增加页面的引用计数，确保页面在使用时不会被释放。
+	SetPagePrivate(page);	// 设置页面的私有标志位，标识该页面现在包含了私有数据。
+	// 将缓冲头链表的头部地址存储为页面的私有数据。
 	set_page_private(page, (unsigned long)head);
 }
 

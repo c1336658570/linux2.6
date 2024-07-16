@@ -42,14 +42,20 @@
 #include <linux/mpage.h>
 #include <linux/bit_spinlock.h>
 
+// 声明一个静态函数，该函数用于同步锁定的缓冲区列表。
 static int fsync_buffers_list(spinlock_t *lock, struct list_head *list);
 
+// 定义一个宏，它使用list_entry宏从给定的list_head结构中提取buffer_head结构。
+// list_entry宏通常用于从链表元素获取包含它的结构体。
 #define BH_ENTRY(list) list_entry((list), struct buffer_head, b_assoc_buffers)
 
+// 定义一个内联函数，用于初始化buffer_head结构的某些字段。
 inline void
 init_buffer(struct buffer_head *bh, bh_end_io_t *handler, void *private)
 {
+	// 将handler函数指针赋值给b_end_io，此函数用于IO操作完成后的回调。
 	bh->b_end_io = handler;
+	// 将private指针赋值给b_private，此字段用于存放用户自定义的数据。
 	bh->b_private = private;
 }
 EXPORT_SYMBOL(init_buffer);
@@ -962,46 +968,59 @@ int remove_inode_buffers(struct inode *inode)
  * The retry flag is used to differentiate async IO (paging, swapping)
  * which may not fail from ordinary buffer allocations.
  */
+/*
+ * 在给定一个数据区的页面和每个缓冲区的大小时，创建适当的缓冲区。
+ * 使用 bh->b_this_page 链表来跟踪创建的缓冲区。如果无法创建更多
+ * 缓冲区，则返回 NULL。
+ *
+ * retry 标志用于区分异步 IO（分页、交换）与普通缓冲区分配，
+ * 前者可能不会失败。
+ */
 struct buffer_head *alloc_page_buffers(struct page *page, unsigned long size,
 		int retry)
 {
 	struct buffer_head *bh, *head;
 	long offset;
 
-try_again:
-	head = NULL;
-	offset = PAGE_SIZE;
-	while ((offset -= size) >= 0) {
+try_again:	// 重试标签，用于缓冲区创建失败时重新尝试
+	head = NULL;	// 初始化头部指针
+	offset = PAGE_SIZE;	// 设置偏移量为页面大小
+	while ((offset -= size) >= 0) {	// 循环减小偏移量，创建缓冲区
+		// 分配一个新的缓冲区头
 		bh = alloc_buffer_head(GFP_NOFS);
 		if (!bh)
-			goto no_grow;
+			goto no_grow;	// 如果分配失败，跳转到清理代码
 
-		bh->b_bdev = NULL;
-		bh->b_this_page = head;
-		bh->b_blocknr = -1;
-		head = bh;
+		bh->b_bdev = NULL;  // 设置缓冲区的块设备为 NULL
+		bh->b_this_page = head;  // 链接当前缓冲区到链表头
+		bh->b_blocknr = -1;  // 设置块编号为 -1
+		head = bh;  // 更新链表头
 
-		bh->b_state = 0;
-		atomic_set(&bh->b_count, 0);
-		bh->b_private = NULL;
-		bh->b_size = size;
+		bh->b_state = 0;  // 初始化状态为 0
+		atomic_set(&bh->b_count, 0);  // 设置引用计数为 0
+		bh->b_private = NULL;  // 私有数据设置为 NULL
+		bh->b_size = size;  // 设置缓冲区大小
 
 		/* Link the buffer to its page */
-		set_bh_page(bh, page, offset);
+		/* 将缓冲区链接到它的页面 */
+		set_bh_page(bh, page, offset);	// 设置缓冲区的页面和偏移量
 
-		init_buffer(bh, NULL, NULL);
+		init_buffer(bh, NULL, NULL);		// 初始化缓冲区
 	}
-	return head;
+	return head;	// 返回创建的缓冲区链表头
 /*
  * In case anything failed, we just free everything we got.
+ */
+/*
+ * 如果出现任何失败，我们就释放我们得到的所有东西。
  */
 no_grow:
 	if (head) {
 		do {
-			bh = head;
-			head = head->b_this_page;
-			free_buffer_head(bh);
-		} while (head);
+			bh = head;	// 获取链表头
+			head = head->b_this_page;	// 移动到下一个缓冲区
+			free_buffer_head(bh);	// 释放缓冲区头
+		} while (head);	// 循环直到链表为空
 	}
 
 	/*
@@ -1010,8 +1029,13 @@ no_grow:
 	 * become available.  But we don't want tasks sleeping with 
 	 * partially complete buffers, so all were released above.
 	 */
+	/*
+	 * 对于非异步 IO 请求，返回失败。异步 IO 请求不允许失败，
+	 * 所以我们必须等到缓冲区头变得可用。但我们不希望任务在
+	 * 缓冲区部分完成时进入睡眠状态，所以上面释放了所有缓冲区。
+	 */
 	if (!retry)
-		return NULL;
+		return NULL;	// 如果不允许重试，则返回 NULL
 
 	/* We're _really_ low on memory. Now we just
 	 * wait for old buffer heads to become free due to
@@ -1019,8 +1043,12 @@ no_grow:
 	 * the reserve list is empty, we're sure there are 
 	 * async buffer heads in use.
 	 */
-	free_more_memory();
-	goto try_again;
+	/* 我们的内存真的很紧张。现在我们只是等待旧的缓冲区头
+	 * 因完成 IO 而释放。由于这是一个异步请求，并且保留列表为空，
+	 * 我们确定有正在使用的异步缓冲区头。
+	 */
+	free_more_memory();	// 尝试释放更多内存
+	goto try_again;			// 重试创建缓冲区
 }
 EXPORT_SYMBOL_GPL(alloc_page_buffers);
 
@@ -1675,32 +1703,45 @@ EXPORT_SYMBOL(block_invalidatepage);
  * __set_page_dirty_buffers() via private_lock.  try_to_free_buffers
  * is already excluded via the page lock.
  */
+/*
+ * 我们原子地关联并可能使缓冲区变脏，相对于 __set_page_dirty_buffers() 通过 private_lock。
+ * try_to_free_buffers 已通过页面锁被排除。
+ */
 void create_empty_buffers(struct page *page,
 			unsigned long blocksize, unsigned long b_state)
 {
 	struct buffer_head *bh, *head, *tail;
 
+	// 为给定的页分配一个新的缓冲区链
 	head = alloc_page_buffers(page, blocksize, 1);
 	bh = head;
 	do {
+		// 将给定的状态标志位设置到缓冲区状态中
 		bh->b_state |= b_state;
 		tail = bh;
+		// 移动到该页的下一个缓冲区
 		bh = bh->b_this_page;
-	} while (bh);
+	} while (bh);	// 循环直到遍历完所有缓冲区
+	// 将缓冲区链形成一个环形结构，tail的下一个指向head
 	tail->b_this_page = head;
 
+	// 锁定页映射的私有锁
 	spin_lock(&page->mapping->private_lock);
+	// 如果页面已更新或已脏，则设置缓冲区的相应状态
 	if (PageUptodate(page) || PageDirty(page)) {
 		bh = head;
 		do {
 			if (PageDirty(page))
-				set_buffer_dirty(bh);
+				set_buffer_dirty(bh);	// 标记缓冲区为脏
 			if (PageUptodate(page))
-				set_buffer_uptodate(bh);
+				set_buffer_uptodate(bh);	// 标记缓冲区已更新
+			// 移动到下一个缓冲区
 			bh = bh->b_this_page;
-		} while (bh != head);
+		} while (bh != head);	// 循环直到回到起点
 	}
+	// 将缓冲区链附加到页面
 	attach_page_buffers(page, head);
+	// 解锁页映射的私有锁
 	spin_unlock(&page->mapping->private_lock);
 }
 EXPORT_SYMBOL(create_empty_buffers);
@@ -3620,39 +3661,58 @@ static struct kmem_cache *bh_cachep;
  * Once the number of bh's in the machine exceeds this level, we start
  * stripping them in writeback.
  */
-static int max_buffer_heads;
+/*
+ * 当机器中的缓冲头数量超过此水平时，我们开始在回写中剥离它们。
+ */
+static int max_buffer_heads;	// 定义一个静态变量存储最大缓冲头数量
 
-int buffer_heads_over_limit;
+int buffer_heads_over_limit;	 // 定义一个整型变量，用于表示是否超过最大缓冲头数量的限制
 
 struct bh_accounting {
+	/* 存活的缓冲头数量 */
 	int nr;			/* Number of live bh's */
+	/* 限制高速缓存行抖动 */
 	int ratelimit;		/* Limit cacheline bouncing */
 };
 
+// 定义一个每个CPU的bh_accounting结构，初始值为 {0, 0}
 static DEFINE_PER_CPU(struct bh_accounting, bh_accounting) = {0, 0};
 
+// 重新计算缓冲头的状态
 static void recalc_bh_state(void)
 {
 	int i;
-	int tot = 0;
+	int tot = 0;	// 用于统计所有CPU的缓冲头数量
 
+	// 如果当前CPU的缓冲头限制计数尚未达到4096，则返回
 	if (__get_cpu_var(bh_accounting).ratelimit++ < 4096)
 		return;
+	// 重置当前CPU的缓冲头限制计数
 	__get_cpu_var(bh_accounting).ratelimit = 0;
+	// 遍历每一个在线的CPU
 	for_each_online_cpu(i)
+		// 累加每个CPU的缓冲头数量
 		tot += per_cpu(bh_accounting, i).nr;
+	// 更新是否超过最大缓冲头数量的标志
 	buffer_heads_over_limit = (tot > max_buffer_heads);
 }
 	
+// 分配一个缓冲头的函数
 struct buffer_head *alloc_buffer_head(gfp_t gfp_flags)
 {
+	// 使用指定的内存分配标志从缓冲头缓存中分配一个缓冲头
 	struct buffer_head *ret = kmem_cache_zalloc(bh_cachep, gfp_flags);
 	if (ret) {
+		// 初始化关联的缓冲列表头
 		INIT_LIST_HEAD(&ret->b_assoc_buffers);
+		// 获取当前CPU的bh_accounting变量并增加存活的缓冲头数量
 		get_cpu_var(bh_accounting).nr++;
+		// 重新计算缓冲头状态
 		recalc_bh_state();
+		// 释放当前CPU的bh_accounting变量
 		put_cpu_var(bh_accounting);
 	}
+	// 返回新分配的缓冲头
 	return ret;
 }
 EXPORT_SYMBOL(alloc_buffer_head);

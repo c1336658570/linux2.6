@@ -268,7 +268,6 @@ struct class {
 };
 
 // class为了遍历设备链表，特意定义了专门的结构和遍历函数（在class.h和class.c中），实现如下。
-// class为了遍历设备链表，特意定义了专门的结构和遍历函数，实现如下。
 // 之所以要如此费一番周折，在klist_iter外面加上这一层封装，完全是为了对链表进行选择性遍历。
 // 选择的条件就是device_type。device_type是在device结构中使用的类型，
 // 其中定义了相似设备使用的一些处理操作，可以说比class的划分还要小一层。
@@ -597,143 +596,200 @@ struct device {
 };
 
 /* Get the wakeup routines, which depend on struct device */
-#include <linux/pm_wakeup.h>
+/* 获取依赖于 struct device 的唤醒例程 */
+#include <linux/pm_wakeup.h>	// 包含 Linux 的电源管理唤醒相关的头文件
 
+/* 定义一个内联函数，用于获取设备的名称 */
 static inline const char *dev_name(const struct device *dev)
 {
-	return kobject_name(&dev->kobj);
+	return kobject_name(&dev->kobj);	// 返回设备关联的 kobject 的名称
 }
 
+/* 声明一个函数用于设置设备的名称，该函数支持 printf 格式的变参输入 */
 extern int dev_set_name(struct device *dev, const char *name, ...)
-			__attribute__((format(printf, 2, 3)));
+			__attribute__((format(printf, 2, 3)));	// 指定函数参数2和3必须遵循 printf 格式字符串的语法
 
 #ifdef CONFIG_NUMA
+/* 定义一个内联函数，用于获取设备所在的 NUMA 节点 */
 static inline int dev_to_node(struct device *dev)
 {
-	return dev->numa_node;
+	return dev->numa_node;	// 返回设备的 NUMA 节点编号
 }
+/* 定义一个内联函数，用于设置设备所在的 NUMA 节点 */
 static inline void set_dev_node(struct device *dev, int node)
 {
-	dev->numa_node = node;
+	dev->numa_node = node;	// 设置设备的 NUMA 节点编号
 }
 #else
+/* 如果系统不支持 NUMA，以下是相关函数的实现 */
+/* 定义一个内联函数，用于获取设备所在的 NUMA 节点，因为不支持 NUMA，所以始终返回 -1 */
 static inline int dev_to_node(struct device *dev)
 {
 	return -1;
 }
+/* 定义一个内联函数，用于设置设备所在的 NUMA 节点，因为不支持 NUMA，所以此函数为空操作 */
 static inline void set_dev_node(struct device *dev, int node)
 {
 }
 #endif
 
+/* 获取设备是否抑制uevent（用户空间事件）广播的状态 */
 static inline unsigned int dev_get_uevent_suppress(const struct device *dev)
 {
-	return dev->kobj.uevent_suppress;
+	return dev->kobj.uevent_suppress;	// 返回设备的 uevent_suppress 值
 }
 
+/* 设置设备是否抑制uevent（用户空间事件）广播 */
 static inline void dev_set_uevent_suppress(struct device *dev, int val)
 {
-	dev->kobj.uevent_suppress = val;
+	dev->kobj.uevent_suppress = val;	// 设置设备的 uevent_suppress 值
+
 }
 
+/* 检查设备是否已在系统的 sysfs 文件系统中注册 */
 static inline int device_is_registered(struct device *dev)
 {
-	return dev->kobj.state_in_sysfs;
+	return dev->kobj.state_in_sysfs;	// 返回设备是否已在 sysfs 中注册的状态
 }
 
+// 异步挂起允许设备独立于主 CPU 挂起，提高系统响应速度和电源效率
+/* 为设备启用异步挂起模式 */
 static inline void device_enable_async_suspend(struct device *dev)
 {
-	if (dev->power.status == DPM_ON)
-		dev->power.async_suspend = true;
+	if (dev->power.status == DPM_ON)	// 如果设备的电源管理状态为打开
+		dev->power.async_suspend = true;	// 开启异步挂起
 }
 
+/* 禁用设备的异步挂起模式 */
 static inline void device_disable_async_suspend(struct device *dev)
 {
-	if (dev->power.status == DPM_ON)
-		dev->power.async_suspend = false;
+	if (dev->power.status == DPM_ON)	// 如果设备的电源管理状态为打开
+		dev->power.async_suspend = false;	// 关闭异步挂起
 }
 
+/* 检查设备是否启用了异步挂起 */
 static inline bool device_async_suspend_enabled(struct device *dev)
 {
-	return !!dev->power.async_suspend;
+	return !!dev->power.async_suspend;	// 返回异步挂起状态，双重否定操作确保结果为布尔值
 }
 
+/* 锁定设备以进行同步操作 */
 static inline void device_lock(struct device *dev)
 {
-	down(&dev->sem);
+	down(&dev->sem);	// 使用信号量对设备进行锁定
 }
 
+/* 尝试锁定设备，如果设备已锁定则立即返回，不会阻塞 */
 static inline int device_trylock(struct device *dev)
 {
-	return down_trylock(&dev->sem);
+	return down_trylock(&dev->sem);	// 尝试锁定设备的信号量，如果已被其他线程锁定，则返回非0值
 }
 
+/* 解锁设备 */
 static inline void device_unlock(struct device *dev)
 {
-	up(&dev->sem);
+	up(&dev->sem);	// 释放设备的信号量，允许其他线程访问
 }
 
-void driver_init(void);
+/* 初始化驱动，具体实现需在其他地方定义 */
+void driver_init(void);	// 声明驱动初始化函数，实际实现在其他文件中
 
 /*
  * High level routines for use by the bus drivers
  */
+/*
+ * 供总线驱动使用的高级例程
+ */
+/* 注册一个设备，必须检查返回值 */
 extern int __must_check device_register(struct device *dev);
+/* 注销一个已注册的设备 */
 extern void device_unregister(struct device *dev);
+/* 初始化一个设备结构 */
 extern void device_initialize(struct device *dev);
+/* 向系统添加一个已初始化的设备，必须检查返回值 */
 extern int __must_check device_add(struct device *dev);
+/* 从系统中删除一个设备 */
 extern void device_del(struct device *dev);
+/* 遍历一个设备的所有子设备 */
 extern int device_for_each_child(struct device *dev, void *data,
 		     int (*fn)(struct device *dev, void *data));
+/* 根据指定条件查找子设备 */
 extern struct device *device_find_child(struct device *dev, void *data,
 				int (*match)(struct device *dev, void *data));
+/* 重命名一个设备 */
 extern int device_rename(struct device *dev, char *new_name);
+/* 将设备移动到新的父设备下 */
 extern int device_move(struct device *dev, struct device *new_parent,
 		       enum dpm_order dpm_order);
+/* 获取设备的设备节点名称 */
 extern const char *device_get_devnode(struct device *dev,
 				      mode_t *mode, const char **tmp);
+/* 获取设备关联的驱动数据 */
 extern void *dev_get_drvdata(const struct device *dev);
+/* 设置设备关联的驱动数据 */
 extern void dev_set_drvdata(struct device *dev, void *data);
 
 /*
  * Root device objects for grouping under /sys/devices
  */
+/*
+ * 用于在 /sys/devices 下分组的根设备对象
+ */
+/* 注册一个根设备对象，需要提供设备名称和模块所有者 */
 extern struct device *__root_device_register(const char *name,
 					     struct module *owner);
+/* 通过内联函数简化根设备注册的调用，自动使用当前模块作为所有者 */
 static inline struct device *root_device_register(const char *name)
 {
+	// 调用底层函数注册设备，并将当前模块作为所有者
 	return __root_device_register(name, THIS_MODULE);
 }
+/* 注销一个根设备对象 */
 extern void root_device_unregister(struct device *root);
 
+/* 获取设备的平台数据 */
 static inline void *dev_get_platdata(const struct device *dev)
 {
-	return dev->platform_data;
+	return dev->platform_data;	// 返回设备结构中的平台数据字段
 }
 
 /*
  * Manual binding of a device to driver. See drivers/base/bus.c
  * for information on use.
  */
+/*
+ * 设备手动绑定到驱动。有关使用方法，请参见 drivers/base/bus.c。
+ */
+/* 将设备绑定到驱动，必须检查返回值 */
 extern int __must_check device_bind_driver(struct device *dev);
+/* 释放设备与驱动的绑定 */
 extern void device_release_driver(struct device *dev);
+/* 将设备附加到已绑定的驱动，必须检查返回值 */
 extern int  __must_check device_attach(struct device *dev);
+/* 尝试将所有待处理的设备附加到指定驱动，必须检查返回值 */
 extern int __must_check driver_attach(struct device_driver *drv);
+/* 重新探测设备，尝试重新绑定驱动，必须检查返回值 */
 extern int __must_check device_reprobe(struct device *dev);
 
 /*
  * Easy functions for dynamically creating devices on the fly
  */
+/*
+ * 便捷的函数，用于动态地在运行时创建设备
+ */
+/* 使用变量参数列表动态创建设备 */
 extern struct device *device_create_vargs(struct class *cls,
 					  struct device *parent,
 					  dev_t devt,
 					  void *drvdata,
 					  const char *fmt,
 					  va_list vargs);
+/* 动态创建设备，支持 printf 格式的变参 */
 extern struct device *device_create(struct class *cls, struct device *parent,
 				    dev_t devt, void *drvdata,
 				    const char *fmt, ...)
 				    __attribute__((format(printf, 5, 6)));
+/* 销毁之前创建的设备 */
 extern void device_destroy(struct class *cls, dev_t devt);
 
 /*
@@ -742,34 +798,46 @@ extern void device_destroy(struct class *cls, dev_t devt);
  * know about.
  */
 /* Notify platform of device discovery */
+/*
+ * 平台“修正”函数 - 允许平台对设备和动作发表意见，
+ * 这些设备和动作是通用设备层不了解的。
+ */
+/* 通知平台有关设备的发现 */
 extern int (*platform_notify)(struct device *dev);
 
+/* 通知平台有关设备移除的操作 */
 extern int (*platform_notify_remove)(struct device *dev);
 
 
 /**
  * get_device - atomically increment the reference count for the device.
- *
  */
-extern struct device *get_device(struct device *dev);
-extern void put_device(struct device *dev);
+/**
+ * 原子地增加设备的引用计数。
+ */
+extern struct device *get_device(struct device *dev);	// 获取设备并增加其引用计数
+extern void put_device(struct device *dev);	// 释放设备并减少其引用计数
 
-extern void wait_for_device_probe(void);
+extern void wait_for_device_probe(void);	// 等待设备探测完成
 
+/* 如果配置了 CONFIG_DEVTMPFS，以下是相关函数定义 */
 #ifdef CONFIG_DEVTMPFS
-extern int devtmpfs_create_node(struct device *dev);
-extern int devtmpfs_delete_node(struct device *dev);
-extern int devtmpfs_mount(const char *mntdir);
+extern int devtmpfs_create_node(struct device *dev);	// 在 devtmpfs 中为设备创建节点
+extern int devtmpfs_delete_node(struct device *dev);	// 在 devtmpfs 中删除设备节点
+extern int devtmpfs_mount(const char *mntdir);		// 挂载 devtmpfs
 #else
+/* 如果未配置 CONFIG_DEVTMPFS，以下函数为空操作并返回 0 */
 static inline int devtmpfs_create_node(struct device *dev) { return 0; }
 static inline int devtmpfs_delete_node(struct device *dev) { return 0; }
 static inline int devtmpfs_mount(const char *mountpoint) { return 0; }
 #endif
 
 /* drivers/base/power/shutdown.c */
+/* 用于关闭设备的函数 */
 extern void device_shutdown(void);
 
 /* drivers/base/sys.c */
+/* 用于关闭系统设备的函数 */
 extern void sysdev_shutdown(void);
 
 /* debugging and troubleshooting/diagnostic helpers. */

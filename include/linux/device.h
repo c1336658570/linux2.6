@@ -841,11 +841,13 @@ extern void device_shutdown(void);
 extern void sysdev_shutdown(void);
 
 /* debugging and troubleshooting/diagnostic helpers. */
+/* 定义一个宏，用于格式化并打印设备相关的日志信息 */
 extern const char *dev_driver_string(const struct device *dev);
 #define dev_printk(level, dev, format, arg...)	\
 	printk(level "%s %s: " format , dev_driver_string(dev) , \
 	       dev_name(dev) , ## arg)
 
+/* 定义不同日志级别的宏，用于打印紧急、警告、错误等信息 */
 #define dev_emerg(dev, format, arg...)		\
 	dev_printk(KERN_EMERG , dev , format , ## arg)
 #define dev_alert(dev, format, arg...)		\
@@ -862,21 +864,25 @@ extern const char *dev_driver_string(const struct device *dev);
 	dev_printk(KERN_INFO , dev , format , ## arg)
 
 #if defined(DEBUG)
+/* 如果定义了 DEBUG，dev_dbg 宏用于输出调试级别的日志 */
 #define dev_dbg(dev, format, arg...)		\
 	dev_printk(KERN_DEBUG , dev , format , ## arg)
 #elif defined(CONFIG_DYNAMIC_DEBUG)
+/* 如果定义了 CONFIG_DYNAMIC_DEBUG，使用动态调试功能 */
 #define dev_dbg(dev, format, ...) do { \
 	dynamic_dev_dbg(dev, format, ##__VA_ARGS__); \
 	} while (0)
 #else
+/* 如果以上都未定义，dev_dbg 宏将不输出任何内容 */
 #define dev_dbg(dev, format, arg...)		\
 	({ if (0) dev_printk(KERN_DEBUG, dev, format, ##arg); 0; })
 #endif
 
 #ifdef VERBOSE_DEBUG
+/* 如果定义了 VERBOSE_DEBUG，dev_vdbg 宏等同于 dev_dbg */
 #define dev_vdbg	dev_dbg
 #else
-
+/* 如果未定义 VERBOSE_DEBUG，dev_vdbg 宏将不输出任何内容 */
 #define dev_vdbg(dev, format, arg...)		\
 	({ if (0) dev_printk(KERN_DEBUG, dev, format, ##arg); 0; })
 #endif
@@ -886,10 +892,15 @@ extern const char *dev_driver_string(const struct device *dev);
  * of using a WARN/WARN_ON to get the message out, including the
  * file/line information and a backtrace.
  */
+/*
+ * dev_WARN() 行为类似于 dev_printk()，但使用 WARN/WARN_ON 输出消息，
+ * 包括文件/行信息和回溯。
+ */
 #define dev_WARN(dev, format, arg...) \
 	WARN(1, "Device: %s\n" format, dev_driver_string(dev), ## arg);
 
 /* Create alias, so I can be autoloaded. */
+/* 创建别名，以便可以自动加载。 */
 #define MODULE_ALIAS_CHARDEV(major,minor) \
 	MODULE_ALIAS("char-major-" __stringify(major) "-" __stringify(minor))
 #define MODULE_ALIAS_CHARDEV_MAJOR(major) \

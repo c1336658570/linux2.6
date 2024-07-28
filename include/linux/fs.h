@@ -941,7 +941,7 @@ struct inode {
 	// 默认POSIX访问控制列表。
 	struct posix_acl	*i_default_acl;
 #endif
-	void			*i_private; /* fs or device private pointer */	/* fs私有指针 */
+	void			*i_private; /* fs or device private pointer */	/* fs私有指针，在/drivers/devtmpfs中指向挂载点（dev_mnt） */
 };
 
 /*

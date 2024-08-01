@@ -465,12 +465,14 @@ struct dmi_system_id {
 
 #define DMI_MATCH(a, b)	{ a, b }
 
-#define PLATFORM_NAME_SIZE	20
-#define PLATFORM_MODULE_PREFIX	"platform:"
+#define PLATFORM_NAME_SIZE	20  // 平台设备名称的最大长度
+#define PLATFORM_MODULE_PREFIX	"platform:"  // 平台设备的模块前缀
 
+// 定义结构体 platform_device_id，用于描述一个平台设备的标识信息。
+// 这类设备通常与硬件平台紧密关联，不通过如PCI或USB这样的标准总线连接。
 struct platform_device_id {
-	char name[PLATFORM_NAME_SIZE];
-	kernel_ulong_t driver_data
+	char name[PLATFORM_NAME_SIZE];	// 设备名称，设定最大长度为 PLATFORM_NAME_SIZE。
+	kernel_ulong_t driver_data			// 驱动程序私有数据，通过内核定义的类型 kernel_ulong_t 存储。
 			__attribute__((aligned(sizeof(kernel_ulong_t))));
 };
 

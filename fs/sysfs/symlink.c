@@ -346,14 +346,15 @@ static void sysfs_put_link(struct dentry *dentry, struct nameidata *nd, void *co
 		free_page((unsigned long)page);
 }
 
+// 定义了用于sysfs符号链接的inode操作。这些操作允许文件系统执行如读取链接、跟随链接、设置属性等操作。
 const struct inode_operations sysfs_symlink_inode_operations = {
-	.setxattr	= sysfs_setxattr,
-	.readlink	= generic_readlink,
-	.follow_link	= sysfs_follow_link,
-	.put_link	= sysfs_put_link,
-	.setattr	= sysfs_setattr,
-	.getattr	= sysfs_getattr,
-	.permission	= sysfs_permission,
+	.setxattr	= sysfs_setxattr,       // 设置扩展属性，允许对符号链接设置元数据。
+	.readlink	= generic_readlink,     // 读取符号链接的目标，使用通用函数。
+	.follow_link	= sysfs_follow_link,    // 跟随符号链接到其目标，特定于sysfs的处理方式。
+	.put_link	= sysfs_put_link,       // 在跟随符号链接后进行清理操作。
+	.setattr	= sysfs_setattr,        // 设置文件属性，如文件权限、时间戳等。
+	.getattr	= sysfs_getattr,        // 获取文件属性，如文件大小、权限、时间戳等。
+	.permission	= sysfs_permission,     // 检查访问权限，确定用户是否有权对符号链接进行操作。
 };
 
 

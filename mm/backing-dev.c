@@ -26,7 +26,11 @@ struct backing_dev_info default_backing_dev_info = {
 	.ra_pages	= VM_MAX_READAHEAD * 1024 / PAGE_CACHE_SIZE,  // 预读页数，根据系统设置计算得出
 	.state		= 0,  // 初始状态为0
 	.capabilities	= BDI_CAP_MAP_COPY,  // 能力包括支持映射复制
-	.unplug_io_fn	= default_unplug_io_fn,  // 使用默认的解除阻塞函数
+	/*
+	 * 默认的设备拔插函数。
+	 */
+	// 这个函数是用来触发设备进行I/O操作的默认函数。
+	.unplug_io_fn	= default_unplug_io_fn,
 };
 EXPORT_SYMBOL_GPL(default_backing_dev_info);
 
@@ -380,6 +384,7 @@ static void bdi_task_init(struct backing_dev_info *bdi,
 	set_user_nice(tsk, 0);	// 设置当前任务的优先级为 0
 }
 
+// 在 bdi_forker_task 中创建一个单独的内核线程，单独的线程就是执行该函数
 static int bdi_start_fn(void *ptr)
 {
 	// 从参数获取写回控制结构
@@ -630,7 +635,7 @@ static int bdi_forker_task(void *ptr)
 			list_add_tail(&bdi->bdi_list, &bdi_pending_list);
 			spin_unlock_bh(&bdi_lock);	// 释放锁
 
-			bdi_flush_io(bdi);	// 强制刷新设备IO
+			bdi_flush_io(bdi);	// 强制刷新设备IO，执行写回操作
 		}
 	}
 

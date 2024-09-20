@@ -31,7 +31,6 @@
 /*
  * 将inode转换为其所在的后备设备信息。
  */
-
 #define inode_to_bdi(inode)	((inode)->i_mapping->backing_dev_info)
 
 /*
@@ -71,6 +70,7 @@ struct wb_writeback_args {
 /*
  * 后备设备写回线程的工作项
  */
+// 描述需要回写的任务。
 struct bdi_work {
 	/* 待处理工作列表 */
 	// 挂在backing_dev_info的work_list下
@@ -78,6 +78,10 @@ struct bdi_work {
 	/* 用于RCU释放或清理工作项 */
 	struct rcu_head rcu_head;	/* for RCU free/clear of work */
 
+	/*
+	 * 下面这两个参数会在 bdi_queue_work 中设置，seen 是一个位图掩码，将 backing_dev_info 的 wb_mask 赋值给seen，
+	 * 代表有哪些 bdi_writeback 可以看到该工作，pending 设置为 wb_cnt，wb_cnt是一共有多少个bdi_writeback
+	 */
 	/* 观察到这项工作的线程数 */
 	unsigned long seen;		/* threads that have seen this work */
 	/* 还需处理这项工作的线程数 */
@@ -94,8 +98,8 @@ struct bdi_work {
  * 定义状态标志位的枚举，用于描述工作项的状态。
  */
 enum {
-	WS_USED_B = 0,
-	WS_ONSTACK_B,
+	WS_USED_B = 0,	/* 标志位，用于表示某个资源或对象已被使用 */
+	WS_ONSTACK_B,		/* 标志位，用于表示某个资源或对象位于堆栈上 */
 };
 
 /*
@@ -145,7 +149,7 @@ static inline void bdi_work_init(struct bdi_work *work,
  */
 int writeback_in_progress(struct backing_dev_info *bdi)
 {
-	return !list_empty(&bdi->work_list);
+	return !list_empty(&bdi->work_list);	// 检查bdi的工作列表是否为空，不为空返回true
 }
 
 /*
@@ -193,7 +197,7 @@ static void bdi_work_free(struct rcu_head *head)
  */
 static void wb_work_complete(struct bdi_work *work)
 {
-	const enum writeback_sync_modes sync_mode = work->args.sync_mode;
+	const enum writeback_sync_modes sync_mode = work->args.sync_mode;	// 获取写回操作的同步模式
 	int onstack = bdi_work_on_stack(work);	// 检查工作项是否在栈上
 
 	/*
@@ -211,7 +215,7 @@ static void wb_work_complete(struct bdi_work *work)
 		bdi_work_clear(work);	// 如果不在栈上，立即清除状态
 	if (sync_mode == WB_SYNC_NONE || onstack)
 		// 如果是非同步模式或在栈上，安排 RCU 释放
-		call_rcu(&work->rcu_head, bdi_work_free);
+		call_rcu(&work->rcu_head, bdi_work_free);	// 如果是非同步模式或在栈上，通过RCU机制延迟释放
 }
 
 /*
@@ -304,9 +308,13 @@ static void bdi_wait_on_work_clear(struct bdi_work *work)
 	// 使用 wait_on_bit() 函数等待指定的工作项完成处理。
 	// 等待工作项的状态位 WS_USED_B 被清除
 	wait_on_bit(&work->state, WS_USED_B, bdi_sched_wait,
-		    TASK_UNINTERRUPTIBLE);
+		    TASK_UNINTERRUPTIBLE);	// 使用指定的等待函数和不可中断的任务状态进行等待
 }
 
+/*
+ * 该函数尝试为非同步写回操作分配并初始化一个 bdi_work 工作项。如果内存分配成功，工作项将被初始化并加入到后备
+ * 设备信息（BDI）的工作队列中。如果内存分配失败，则尝试唤醒后备设备信息中的默认写回线程，以处理旧的脏数据的写回。
+ */
 static void bdi_alloc_queue_work(struct backing_dev_info *bdi,
 				 struct wb_writeback_args *args)
 {
@@ -355,13 +363,14 @@ static void bdi_alloc_queue_work(struct backing_dev_info *bdi,
  *   这个函数执行 WB_SYNC_ALL 数据完整性写回并等待 I/O 完成。
  *   调用者必须持有 sb s_umount 信号量读锁，以避免在操作完成前超级块消失。
  */
+// 对指定的后备设备进行数据完整性写回，并等待I/O操作完成。
 static void bdi_sync_writeback(struct backing_dev_info *bdi,
 			       struct super_block *sb)
 {
 	struct wb_writeback_args args = {
-		.sb		= sb,
-		// 设置同步模式为完全同步
-		.sync_mode	= WB_SYNC_ALL,
+		.sb		= sb,	// 设置写回操作的 super_block
+		// WB_SYNC_ALL 表示当遇到锁住的 inode 时，它必须等待该 inode 解锁，而不能跳过。WB_SYNC_NONE 表示跳过被锁住的 inode；	
+		.sync_mode	= WB_SYNC_ALL,	// 设置同步模式为完全同步
 		.nr_pages	= LONG_MAX,	// 不限制页面数
 		.range_cyclic	= 0,	// 非循环模式
 	};
@@ -398,6 +407,13 @@ static void bdi_sync_writeback(struct backing_dev_info *bdi,
  * 描述:
  *   这是一个 WB_SYNC_NONE 机会性写回。当此函数返回时，IO 才会开始，
  *   我们不保证完成。调用者无需持有 sb s_umount 信号量。
+ */
+/*
+ * 定义了一个函数 bdi_start_writeback，用于启动对一个后备设备中 super_block 的非同步写回操作。
+ * 该函数设置了写回任务的参数，如所操作的 super_block、写回模式（非同步）、涉及的页面数和是否循环写回。
+ * 当传入的页面数为零时，函数将其视为后台写回的特殊情况，设置页面数为最大值并标记为后台写回。
+ * 最后，这个写回任务会通过 bdi_alloc_queue_work 函数进行分配和排队，启动实际的 IO 操作。
+ * 此操作不保证完成时机，且调用者无需持有任何信号量。
  */
 void bdi_start_writeback(struct backing_dev_info *bdi, struct super_block *sb,
 			 long nr_pages)
@@ -441,6 +457,13 @@ void bdi_start_writeback(struct backing_dev_info *bdi, struct super_block *sb,
  * 在设置inode的->dirtied_when时间戳之前，我们检查它是否已经是b_dirty列表上最近被标记脏的inode。
  * 如果是这种情况，则表示inode在写出过程中被重新标记脏了，我们就不重置其dirtied_when。
  */
+/*
+ * 定义了一个函数 redirty_tail，用于将 inode 重新标记为脏并更新其在超级块的脏 inode 列表中的位置。
+ * 首先，它获取与 inode 相关联的后备设备的写回控制结构。如果脏 inode 列表不为空，它会查找列表中最近
+ * 一次被标记为脏的 inode，并比较当前 inode 的脏时间戳。如果当前 inode 的脏时间戳早于列表中的 inode，
+ * 则将当前 inode 的脏时间戳更新为当前时间（jiffies）。
+ */
+// 重新把inode移动到wb->b_dirty链表，并可能会再次更新inode的脏时间
 static void redirty_tail(struct inode *inode)
 {
 	// 获取inode对应的后备设备的写回控制结构
@@ -450,13 +473,17 @@ static void redirty_tail(struct inode *inode)
 		struct inode *tail;
 
 		// 获取列表中最新的inode
-		tail = list_entry(wb->b_dirty.next, struct inode, i_list);
+		tail = list_entry(wb->b_dirty.next, struct inode, i_list);	// 取出wb->b_dirty链表上的第一个脏inode
 		// 如果当前inode的脏时间早于列表中的inode
+		/*
+		 * 如果inode的脏时间比wb->b_dirty链表上的第一个脏inode的脏时间还小还
+     * 老，则把inode的脏时间更新为当前时间
+		 */
 		if (time_before(inode->dirtied_when, tail->dirtied_when))
 			// 更新当前inode的脏时间为当前时间
 			inode->dirtied_when = jiffies;
 	}
-	// 将inode移动到脏列表的末尾
+	// 把inode移动到wb->b_dirty链表头，wb->b_dirty链表头的inode脏时间肯定是最新的，最大的
 	list_move(&inode->i_list, &wb->b_dirty);
 }
 
@@ -465,6 +492,12 @@ static void redirty_tail(struct inode *inode)
  */
 /*
  * 在bdi->b_io列表用尽后，重新排队inode以重新扫描。
+ */
+/*
+ * 定义了一个函数 requeue_io，用于在 bdi->b_io 列表用尽后，将 inode 重新排队以进行重新扫描。
+ * 函数首先获取 inode 对应的后备设备的写回控制结构 wb。然后，它将 inode 从当前位置移动到该后备设备的 
+ * b_more_io 列表中，这个列表用于存放需要进一步 IO 处理的 inode。这样做可以确保 inode 在所有当前 IO 
+ * 操作处理完毕后，能够被重新考虑和处理。
  */
 static void requeue_io(struct inode *inode)
 {
@@ -475,6 +508,12 @@ static void requeue_io(struct inode *inode)
 	list_move(&inode->i_list, &wb->b_more_io);
 }
 
+/*
+ * 定义了一个函数 inode_sync_complete，用于在 inode 同步操作完成后执行必要的清理和唤醒操作。
+ * 函数首先设置一个内存屏障（smp_mb()），以确保之前对 inode 的所有写操作都在继续之前完成，
+ * 从而防止因编译器或处理器优化导致的指令重排序。接着，该函数通过 wake_up_bit 唤醒所有在 
+ * inode 的 i_state 字段中等待 __I_SYNC 位被清除的进程。
+ */
 static void inode_sync_complete(struct inode *inode)
 {
 	/*
@@ -488,6 +527,13 @@ static void inode_sync_complete(struct inode *inode)
 	wake_up_bit(&inode->i_state, __I_SYNC);
 }
 
+/*
+ * 定义了一个函数 inode_dirtied_after，用于判断 inode 的脏时间是否晚于给定的时间 t。
+ * 首先，使用 time_after 函数检查 inode->dirtied_when 是否晚于 t。对于非64位系统，
+ * 还有一个额外的检查：如果 dirtied_when 持续被更新，可能会出现看似在未来但实际在遥远过去的情况，
+ * 这种“环绕”可能阻碍 bdi 的整体写回过程。因此，使用 time_before_eq 函数确保 dirtied_when 
+ * 不晚于当前时间 jiffies，避免时间环绕问题。
+ */
 static bool inode_dirtied_after(struct inode *inode, unsigned long t)
 {
 	// 检查inode的脏时间是否晚于指定时间t
@@ -514,6 +560,14 @@ static bool inode_dirtied_after(struct inode *inode, unsigned long t)
  */
 /*
  * 从@delaying_queue移动已到期的脏inode到@dispatch_queue。
+ */
+/*
+ * 定义了一个函数 move_expired_inodes，功能是将过期的脏 inode 从 delaying_queue 移动到 dispatch_queue。
+ * 此操作首先遍历 delaying_queue，检查每个 inode 是否过期（通过比较它们的 dirtied_when 时间戳）。
+ * 如果 inode 过期，且存在跨越不同超级块的 inode，将设置排序标志 do_sb_sort。过期的 inode 会被移到一个临时列表 
+ * tmp 中。根据 do_sb_sort 的值，如果不需要跨超级块排序，则所有 inode 会直接添加到 dispatch_queue；
+ * 如果需要排序，则会将同一个超级块的 inode 聚集在一起后再移动到 dispatch_queue。这样做可以优化写回操作的效率，
+ * 确保同一超级块的 inode 在一起处理。
  */
 static void move_expired_inodes(struct list_head *delaying_queue,
 			       struct list_head *dispatch_queue,
@@ -577,6 +631,12 @@ static void move_expired_inodes(struct list_head *delaying_queue,
 /*
  * 对所有过期的脏inode进行排队以进行IO操作，从最老的inode开始。
  */
+/*
+ * 用于将所有过期的脏 inode 排队进行 IO 操作。该函数首先使用 list_splice_init 函数将 b_more_io 列表
+ * （其中包含需要更多 IO 处理的 inode）初始化并移动到 b_io 列表的末尾。这样做是为了确保先处理已经等待更久的 inode。
+ * 接着，通过调用 move_expired_inodes 函数，将 b_dirty 列表中所有过期的脏 inode
+ * （根据 older_than_this 时间戳判断过期）移动到 b_io 列表，准备进行 IO 操作。
+ */
 static void queue_io(struct bdi_writeback *wb, unsigned long *older_than_this)
 {
 	// 初始化并移动b_more_io列表到b_io列表末尾
@@ -602,6 +662,14 @@ static int write_inode(struct inode *inode, struct writeback_control *wbc)
  */
 /*
  * 等待inode上的写回操作完成。
+ */
+/*
+ * 定义了一个函数 inode_wait_for_writeback，用于在一个 inode 上等待写回操作完成。首先，它使用 
+ * DEFINE_WAIT_BIT 宏定义了一个等待队列元素 wq，关联到 inode 的 I_SYNC 状态位。然后获取这个状态位对应的
+ * 等待队列头 wqh。接下来，代码进入一个循环，其中释放了 inode_lock（以允许其他操作可以访问或修改 inode），
+ * 然后在等待队列上等待 I_SYNC 状态位被清除（即写回完成）。等待使用的是 TASK_UNINTERRUPTIBLE，意味着等待是
+ * 不可中断的。一旦 __wait_on_bit 返回，代码重新获取 inode_lock 并检查 I_SYNC 状态位。如果该位仍然设置，
+ * 循环继续，反之则完成等待。
  */
 static void inode_wait_for_writeback(struct inode *inode)
 {
@@ -650,6 +718,11 @@ static void inode_wait_for_writeback(struct inode *inode)
  *
  * 在inode_lock保护下调用。
  */
+/*
+ * 代码详细描述了在保持 inode_lock 的情况下对单个 inode 进行写回操作的过程，包括在写回前后的状态检查和处理，
+ * 确保数据一致性和写回操作的有效执行。同时，它也处理了同步和异步写回的逻辑差异，确保根据调用者的要求正确地处理
+ * 写回操作。
+ */
 static int
 writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
 {
@@ -675,6 +748,13 @@ writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
 		 * We'll have another go at writing back this inode when we
 		 * completed a full scan of b_io.
 		 */
+		/*
+     * 如果这个inode已经因为写回而被锁定，并且我们没有进行数据完整性的写回，
+     * 把它移动到b_more_io，以便可以继续对s_io上的其他inode进行写回。
+     *
+     * 当我们完成对b_io的完整扫描后，我们将再次尝试对这个inode进行写回。
+     */
+		// WB_SYNC_ALL 表示当遇到锁住的 inode 时，它必须等待该 inode 解锁，而不能跳过。WB_SYNC_NONE 表示跳过被锁住的 inode；
 		if (wbc->sync_mode != WB_SYNC_ALL) {	// 如果不是为了数据完整性的同步写回
 			// 重新排队此inode以后处理
 			requeue_io(inode);
@@ -684,6 +764,9 @@ writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
 		/*
 		 * It's a data-integrity sync.  We must wait.
 		 */
+		/*
+     * 这是一个数据完整性同步。我们必须等待。
+     */
 		// 等待inode写回完成
 		inode_wait_for_writeback(inode);
 	}
@@ -692,7 +775,7 @@ writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
 	BUG_ON(inode->i_state & I_SYNC);
 
 	/* Set I_SYNC, reset I_DIRTY */
-	// 设置I_SYNC标志，重置I_DIRTY
+	/* 设置I_SYNC标志，重置I_DIRTY */
 	dirty = inode->i_state & I_DIRTY;
 	inode->i_state |= I_SYNC;
 	inode->i_state &= ~I_DIRTY;
@@ -708,7 +791,12 @@ writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
 	 * This is important for filesystems that modify metadata on data
 	 * I/O completion.
 	 */
+	/*
+	 * 在写出元数据之前，确保等待数据的写回。
+	 * 这对于在数据I/O完成时修改元数据的文件系统来说很重要。
+	 */
 	// 如果是同步模式
+	// WB_SYNC_ALL 表示当遇到锁住的 inode 时，它必须等待该 inode 解锁，而不能跳过。WB_SYNC_NONE 表示跳过被锁住的 inode；
 	if (wbc->sync_mode == WB_SYNC_ALL) {
 		// 等待文件数据写回完成
 		int err = filemap_fdatawait(mapping);
@@ -717,6 +805,7 @@ writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
 	}
 
 	/* Don't write the inode if only I_DIRTY_PAGES was set */
+	/* 如果只设置了I_DIRTY_PAGES，则不写回inode */
 	// 如果设置了I_DIRTY_SYNC或I_DIRTY_DATASYNC，则写回inode
 	if (dirty & (I_DIRTY_SYNC | I_DIRTY_DATASYNC)) {
 		int err = write_inode(inode, wbc);
@@ -734,6 +823,9 @@ writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
 			/*
 			 * More pages get dirtied by a fast dirtier.
 			 */
+			/*
+			 * 更多页面被快速弄脏者弄脏。
+			 */
 			goto select_queue;
 		} else if (inode->i_state & I_DIRTY) {
 			// 如果inode被重新弄脏
@@ -741,12 +833,19 @@ writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
 			 * At least XFS will redirty the inode during the
 			 * writeback (delalloc) and on io completion (isize).
 			 */
+			/*
+			 * 至少在XFS文件系统中，inode在写回（延迟分配）和I/O完成（文件大小改变）时会被重新弄脏。
+			 */
 			redirty_tail(inode);
 		} else if (mapping_tagged(mapping, PAGECACHE_TAG_DIRTY)) {
 			/*
 			 * We didn't write back all the pages.  nfs_writepages()
 			 * sometimes bales out without doing anything. Redirty
 			 * the inode; Move it from b_io onto b_more_io/b_dirty.
+			 */
+			/*
+			 * 我们没有写回所有页面。nfs_writepages()有时候会退出而不进行任何操作。
+			 * 重新标记inode脏；把它从b_io移动到b_more_io/b_dirty。
 			 */
 			/*
 			 * akpm: if the caller was the kupdate function we put
@@ -757,12 +856,20 @@ writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
 			 * reasons for doing it this way, and I'd rather not
 			 * muck with it at present.
 			 */
+			/*
+			 * 如果调用者是kupdate函数，我们把这个inode放到b_dirty的头部，使它得到优先考虑。
+			 * 否则，移动它到尾部，原因已在那里描述。我不太确定这样做是否有意义。
+			 * 大概我有一个好的理由这样做，目前我宁愿不去修改它。
+			 */
 			// 如果没有写回所有页面
 			if (wbc->for_kupdate) {
 				/*
 				 * For the kupdate function we move the inode
 				 * to b_more_io so it will get more writeout as
 				 * soon as the queue becomes uncongested.
+				 */
+				/*
+				 * 对于kupdate函数，我们将inode移动到b_more_io，以便在队列不拥堵时可以获得更多的写出操作。
 				 */
 				inode->i_state |= I_DIRTY_PAGES;
 select_queue:
@@ -771,10 +878,16 @@ select_queue:
 					/*
 					 * slice used up: queue for next turn
 					 */
+					/*
+					 * 用量已用尽：为下一轮排队
+					 */
 					requeue_io(inode);
 				} else {
 					/*
 					 * somehow blocked: retry later
+					 */
+					/*
+					 * 以某种方式被阻塞：稍后重试
 					 */
 					// 否则，稍后重试
 					redirty_tail(inode);
@@ -788,6 +901,10 @@ select_queue:
 				 * file would indefinitely suspend writeout of
 				 * all the other files.
 				 */
+				/*
+				 * 否则，完全重新弄脏inode，以便这个超级块上的其他inode也能得到一些写出。
+				 * 否则，一个文件的大量写操作会无限期地暂停其他文件的写出。
+				 */
 				inode->i_state |= I_DIRTY_PAGES;
 				redirty_tail(inode);
 			}
@@ -795,11 +912,17 @@ select_queue:
 			/*
 			 * The inode is clean, inuse
 			 */
+			/*
+			 * inode是干净的，正在使用中
+			 */
 			// 如果inode干净且正在使用中
 			list_move(&inode->i_list, &inode_in_use);
 		} else {
 			/*
 			 * The inode is clean, unused
+			 */
+			/*
+			 * inode是干净的，未使用
 			 */
 			// 如果inode干净且未使用
 			list_move(&inode->i_list, &inode_unused);
@@ -809,16 +932,23 @@ select_queue:
 	return ret;	// 返回结果
 }
 
+/*
+ * 释放针对超级块的写回锁定并减少其引用计数。
+ * 该函数用于在完成对超级块的写回操作后，释放之前加上的读锁（up_read），并通过调用 put_super 函数减少对该超级块的引用计数。
+ */
 static void unpin_sb_for_writeback(struct super_block *sb)
 {
-	up_read(&sb->s_umount);
-	put_super(sb);
+	up_read(&sb->s_umount);	// 释放读锁
+	put_super(sb);	// 减少超级块的引用计数
 }
 
+/*
+ * 枚举类型：定义超级块的锁定状态
+ */
 enum sb_pin_state {
-	SB_PINNED,
-	SB_NOT_PINNED,
-	SB_PIN_FAILED
+	SB_PINNED,      // 超级块已锁定
+	SB_NOT_PINNED,  // 超级块未锁定
+	SB_PIN_FAILED   // 超级块锁定失败
 };
 
 /*
@@ -826,31 +956,45 @@ enum sb_pin_state {
  * before calling writeback. So make sure that we do pin it, so it doesn't
  * go away while we are writing inodes from it.
  */
+/*
+ * 对于非同步（WB_SYNC_NONE）写回，调用者在调用写回之前没有固定超级块。
+ * 因此确保我们确实固定了它，这样在我们从中写入inode时它不会消失。
+ */
+/*
+ * 定义了一个函数 pin_sb_for_writeback，用于固定一个超级块，以确保在执行写回操作期间，
+ * 超级块不会被卸载或释放。函数的行为取决于写回控制结构 wbc 中指定的同步模式
+ */
 static enum sb_pin_state pin_sb_for_writeback(struct writeback_control *wbc,
 					      struct super_block *sb)
 {
 	/*
 	 * Caller must already hold the ref for this
 	 */
+	/*
+   * 调用者必须已经持有引用
+   */
 	if (wbc->sync_mode == WB_SYNC_ALL) {
 		WARN_ON(!rwsem_is_locked(&sb->s_umount));
 		return SB_NOT_PINNED;
 	}
 	spin_lock(&sb_lock);
-	sb->s_count++;
-	if (down_read_trylock(&sb->s_umount)) {
-		if (sb->s_root) {
+	sb->s_count++;	// 增加超级块的引用计数
+	if (down_read_trylock(&sb->s_umount)) {	// 尝试获取读锁
+		if (sb->s_root) {	// 如果超级块已经挂载
 			spin_unlock(&sb_lock);
-			return SB_PINNED;
+			return SB_PINNED;	// 成功固定
 		}
 		/*
 		 * umounted, drop rwsem again and fall through to failure
 		 */
+		/*
+     * 已卸载，再次释放读锁，并处理失败情况
+     */
 		up_read(&sb->s_umount);
 	}
-	sb->s_count--;
+	sb->s_count--;	// 引用计数减少
 	spin_unlock(&sb_lock);
-	return SB_PIN_FAILED;
+	return SB_PIN_FAILED;	// 返回固定失败
 }
 
 /*
@@ -871,6 +1015,7 @@ static enum sb_pin_state pin_sb_for_writeback(struct writeback_control *wbc,
  * 否则只写回那些在逆序中顺序连续的inodes。
  * 如果调用者的写回例程应该被中断，返回1。否则返回0。
  */
+// 定义了函数 writeback_sb_inodes，其目的是写回属于特定超级块 sb 的 b_io 链表中的 inode。该函数在写回控制结构 wbc 指示的范围内进行操作
 static int writeback_sb_inodes(struct super_block *sb,
 			       struct bdi_writeback *wb,
 			       struct writeback_control *wbc)
@@ -885,13 +1030,13 @@ static int writeback_sb_inodes(struct super_block *sb,
 		if (wbc->sb && sb != inode->i_sb) {
 			/* super block given and doesn't
 			   match, skip this inode */
-			// 如果指定了超级块且当前inode的超级块不匹配，则跳过此inode
+			/* 如果指定了超级块且当前inode的超级块不匹配，则跳过此inode */
 			redirty_tail(inode);
 			continue;
 		}
 		if (sb != inode->i_sb)
 			/* finish with this superblock */
-			// 完成此超级块的处理
+			/* 完成此超级块的处理 */
 			return 0;
 		if (inode->i_state & (I_NEW | I_WILL_FREE)) {
 			// 如果inode处于新建或将被释放的状态，则重新排队
@@ -902,14 +1047,17 @@ static int writeback_sb_inodes(struct super_block *sb,
 		 * Was this inode dirtied after sync_sb_inodes was called?
 		 * This keeps sync from extra jobs and livelock.
 		 */
-		// 检查此inode是否在sync_sb_inodes被调用后被弄脏
+		/*
+     * 检查此inode是否在sync_sb_inodes被调用后被弄脏
+     * 这避免了sync操作造成额外的工作和活锁。
+     */
 		if (inode_dirtied_after(inode, wbc->wb_start))
 			return 1;
 
 		// 检查inode状态的合理性
-		BUG_ON(inode->i_state & (I_FREEING | I_CLEAR));
+		BUG_ON(inode->i_state & (I_FREEING | I_CLEAR));	// 如果inode处于释放或清除状态，则触发BUG
 		__iget(inode);	// 增加inode的引用计数
-		pages_skipped = wbc->pages_skipped;
+		pages_skipped = wbc->pages_skipped;	// 记录之前跳过的页数
 		// 写回单个inode
 		writeback_single_inode(inode, wbc);
 		if (wbc->pages_skipped != pages_skipped) {
@@ -917,23 +1065,25 @@ static int writeback_sb_inodes(struct super_block *sb,
 			 * writeback is not making progress due to locked
 			 * buffers.  Skip this inode for now.
 			 */
-			// 如果写回没有取得进展，可能是因为缓冲区锁定。现在跳过此inode。
-			redirty_tail(inode);
+			/*
+       * 如果写回没有取得进展，可能是因为缓冲区锁定。现在跳过此inode。
+       */
+			redirty_tail(inode);	// 将inode重新标记为脏，并放回脏列表的尾部
 		}
 		spin_unlock(&inode_lock);	// 解锁
 		iput(inode);	// 减少inode的引用计数
-		cond_resched();	// 条件调度
+		cond_resched();	// 条件调度，让出CPU
 		spin_lock(&inode_lock);	// 加锁
 		if (wbc->nr_to_write <= 0) {
-			wbc->more_io = 1;
-			return 1;
+			wbc->more_io = 1;	// 如果写回配额已用完，标记需要更多IO处理
+			return 1;	// 返回1，提示调用者中断写回例程
 		}
 		if (!list_empty(&wb->b_more_io))
-			wbc->more_io = 1;
+			wbc->more_io = 1;	// 如果还有更多等待IO处理的inode，标记需要更多IO处理
 	}
 	/* b_io is empty */
 	// b_io列表为空
-	return 1;
+	return 1;	// 返回1，表示所有待处理的inode都已完成，可以中断写回操作
 }
 
 /*
@@ -944,13 +1094,20 @@ static int writeback_sb_inodes(struct super_block *sb,
  * 这个函数执行具体的写回操作，处理wb中的inode列表，根据条件选择合适的inode进行写回。
  * 这个过程包括对超级块的操作锁定，以确保文件系统的一致性。
  */
+/*
+ * writeback_inodes_wb 函数的实现，主要负责处理写回设备 wb 中的 inode 列表。函数首先锁定 inode 列表，
+ * 确保操作的线程安全。根据条件，如果不是定期更新或 b_io 列表为空，则将 IO 队列化。接着，它遍历 b_io 列表中的 inode，
+ * 对每个 inode 的超级块进行锁定准备写回，如果锁定成功，则调用 writeback_sb_inodes 函数执行写回操作。
+ * 如果写回过程中出现错误或写回设定的 inode 完成，则解锁超级块并退出循环。最后，函数解锁 inode 列表，
+ * 保留任何未完成写回的 inode 在 b_io 中。
+ */
 static void writeback_inodes_wb(struct bdi_writeback *wb,
 				struct writeback_control *wbc)
 {
 	int ret = 0;
 
 	/* 避免活锁 */
-	wbc->wb_start = jiffies; /* livelock avoidance */
+	wbc->wb_start = jiffies; /* livelock avoidance */	/* 避免活锁的开始时间 */
 	spin_lock(&inode_lock);	// 锁定inode列表，保证线程安全
 	// 如果不是为了定期更新，或者列表为空，则队列化IO
 	if (!wbc->for_kupdate || list_empty(&wb->b_io))
@@ -969,8 +1126,7 @@ static void writeback_inodes_wb(struct bdi_writeback *wb,
 			/* super block given and doesn't
 			   match, skip this inode */
 			/* 如果指定了超级块且当前inode的超级块不匹配，则跳过 */
-			// 将inode重新标记为dirty，放回列表末尾
-			redirty_tail(inode);
+			redirty_tail(inode);	// 将inode重新标记为dirty，放回列表末尾
 			continue;
 		}
 		// 锁定超级块，准备写回
@@ -1002,6 +1158,10 @@ static void writeback_inodes_wb(struct bdi_writeback *wb,
  *
  * 这个函数简单地调用 writeback_inodes_wb 来执行实际的写回操作，使用从 wbc 结构体提取的特定 bdi (后台设备信息)。
  */
+/*
+ * 定义了函数 writeback_inodes_wbc，其主要职责是负责文件系统的写回操作。函数首先从 writeback_control 结构体 wbc 
+ * 中获取后台设备信息 (backing_dev_info)，然后使用这个信息调用另一个函数 writeback_inodes_wb 来执行实际的写回操作。
+ */
 void writeback_inodes_wbc(struct writeback_control *wbc)
 {
 	// 从wbc结构体中获取bdi
@@ -1018,16 +1178,28 @@ void writeback_inodes_wbc(struct writeback_control *wbc)
  * been forced to throttle against that inode.  Also, the code reevaluates
  * the dirty each time it has written this many pages.
  */
+/*
+ * 在单次bdi刷新/定期更新操作中写出的最大页面数。
+ * 我们这样做是为了避免在inode上持有I_SYNC过长时间，
+ * 这会阻塞一个用户空间任务，该任务可能因为该inode而被迫限流。
+ * 此外，代码在写了这么多页面后会重新评估脏页。
+ */
 #define MAX_WRITEBACK_PAGES     1024
 
+/*
+ * 检查当前系统脏页数量是否超过了后台写回阈值。
+ */
 static inline bool over_bground_thresh(void)
 {
 	unsigned long background_thresh, dirty_thresh;
 
-	get_dirty_limits(&background_thresh, &dirty_thresh, NULL, NULL);
+	// 获取系统当前的脏页限制
+	get_dirty_limits(&background_thresh, &dirty_thresh, NULL, NULL);	// 获取当前的后台和脏页阈值
 
+	// 返回当前脏页数加上不稳定NFS脏页数是否达到或超过了后台写回阈值
 	return (global_page_state(NR_FILE_DIRTY) +
 		global_page_state(NR_UNSTABLE_NFS) >= background_thresh);
+	// 通过 global_page_state 函数获取文件系统脏页 (NR_FILE_DIRTY) 和不稳定NFS脏页 (NR_UNSTABLE_NFS) 的数量
 }
 
 /*
@@ -1174,52 +1346,82 @@ static long wb_writeback(struct bdi_writeback *wb,
  * completion on either receiving the work (WB_SYNC_NONE) or after
  * it is done (WB_SYNC_ALL).
  */
+/*
+ * 返回下一个尚未由此写回线程处理的bdi_work结构。每个存在于该设备的线程
+ * 在首次注意到一个工作项时，->seen 最初被设置。线程首次发现工作项时会清除其位。
+ * 根据写回类型，线程将在接收工作时（WB_SYNC_NONE）或完成后（WB_SYNC_ALL）通知完成。
+ */
+/*
+ * 从给定的后台设备信息（backing_dev_info）中获取下一个未被当前写回线程处理的工作项（bdi_work）。通过使用RCU锁，
+ * 确保在并发环境下安全地访问和修改工作列表。每个工作项的处理状态通过 seen 位标记管理，每个写回线程在处理工作项前会检查
+ * 并清除对应的位。这种设计允许系统高效地分配并跟踪工作项的处理状态，以确保所有工作项都能被适当处理。
+ */
 static struct bdi_work *get_next_work_item(struct backing_dev_info *bdi,
 					   struct bdi_writeback *wb)
 {
-	struct bdi_work *work, *ret = NULL;
+	struct bdi_work *work, *ret = NULL;	// 定义工作指针和返回值
 
-	rcu_read_lock();
+	rcu_read_lock();	// 读取锁定，使用RCU锁来保护遍历过程
 
+	// 遍历bdi的工作列表
 	list_for_each_entry_rcu(work, &bdi->work_list, list) {
-		if (!test_bit(wb->nr, &work->seen))
-			continue;
-		clear_bit(wb->nr, &work->seen);
+		if (!test_bit(wb->nr, &work->seen))	// 检查当前线程是否已经看到这个工作项
+			continue;	// 如果已看到，则跳过
+		clear_bit(wb->nr, &work->seen);	// 清除seen位，标记该工作项已被当前线程处理
 
-		ret = work;
-		break;
+		ret = work;	// 设置返回的工作项
+		break;	// 跳出循环
 	}
 
-	rcu_read_unlock();
-	return ret;
+	rcu_read_unlock();	// 解锁RCU读锁
+	return ret;	// 返回下一个工作项
 }
 
+/*
+ * 检查是否需要根据旧数据的刷新时间间隔进行写回。
+ * @wb: 写回控制块，包含相关写回操作的信息。
+ * 返回写回的页数，如果没有进行写回则返回0。
+ */
+/*
+ * 实现了基于时间间隔的脏数据自动写回功能。它首先检查从上一次写回以来是否已经达到了设定的时间间隔
+ * （dirty_writeback_interval * 10），如果未达到，则直接返回0，不执行写回。如果时间已到，
+ * 它会计算当前系统中的脏页总数（包括文件系统脏页、不稳定的NFS脏页以及活跃的inode数），
+ * 并根据这些脏页数调用写回函数 wb_writeback 进行数据写回，最后返回写回的页数。
+ * 此过程有助于保证系统的数据一致性和性能，通过定期清理脏数据减少系统的I/O压力。
+ */
 static long wb_check_old_data_flush(struct bdi_writeback *wb)
 {
-	unsigned long expired;
-	long nr_pages;
+	unsigned long expired;  // 用于计算过期时间
+	long nr_pages;  // 需要写回的页数
 
+	// 计算旧数据的刷新间隔
 	expired = wb->last_old_flush +
 			msecs_to_jiffies(dirty_writeback_interval * 10);
+	// 如果当前时间未到过期时间，则不进行写回
 	if (time_before(jiffies, expired))
 		return 0;
 
+	// 更新上一次旧数据的刷新时间
 	wb->last_old_flush = jiffies;
+	// 计算当前系统中脏页的总数，包括文件脏页和不稳定的NFS脏页，以及使用的inode数
 	nr_pages = global_page_state(NR_FILE_DIRTY) +
 			global_page_state(NR_UNSTABLE_NFS) +
 			(inodes_stat.nr_inodes - inodes_stat.nr_unused);
 
+	// 如果有需要写回的页
 	if (nr_pages) {
 		struct wb_writeback_args args = {
-			.nr_pages	= nr_pages,
-			.sync_mode	= WB_SYNC_NONE,
-			.for_kupdate	= 1,
-			.range_cyclic	= 1,
+			.nr_pages       = nr_pages,  // 设置需要写回的页数
+			.sync_mode      = WB_SYNC_NONE,  // 设置同步模式为非同步
+			.for_kupdate    = 1,  // 设置为周期性更新的写回
+			.range_cyclic   = 1,  // 设置为循环范围的写回
 		};
 
+		// 调用写回函数，执行写回操作
 		return wb_writeback(wb, &args);
 	}
 
+	// 如果没有需要写回的页，返回0
 	return 0;
 }
 
@@ -1228,6 +1430,21 @@ static long wb_check_old_data_flush(struct bdi_writeback *wb)
  */
 /*
  * 检索工作项并执行它们所描述的回写
+ */
+/*
+ * wb_do_writeback - 检索工作项并执行它们所描述的回写
+ * @wb: 写回控制块，包含相关的后备设备信息和工作列表
+ * @force_wait: 是否强制等待回写完成
+ *
+ * 这个函数负责执行指定写回控制块中的所有工作项。它遍历工作列表，
+ * 获取每个工作项，并根据其描述执行数据回写。如果force_wait为真，则
+ * 强制所有操作等待直到数据完全写入磁盘。
+ */
+/*
+ * 文件系统的核心写回函数，负责按照后备设备信息 (backing_dev_info) 列表中的工作项描述执行数据回写。
+ * 根据每个工作项的同步模式，函数可能立即执行写回或等待直到数据完全写入磁盘。
+ * 如果启用了 force_wait，则所有写回操作都将等待完成。此外，函数还负责执行周期性的旧数据回写，
+ * 以维护系统的数据完整性和性能。
  */
 long wb_do_writeback(struct bdi_writeback *wb, int force_wait)
 {
@@ -1294,6 +1511,14 @@ long wb_do_writeback(struct bdi_writeback *wb, int force_wait)
  */
 /*
  * 处理设备后备的脏数据回写。此外，定期唤醒并执行kupdated风格的刷新。
+ * bdi_writeback_task - 负责执行特定后备设备（backing device）的脏数据回写任务。
+ * 这个函数还会定期唤醒，执行类似于传统kupdated守护进程的刷新操作。
+ */
+/*
+ * 这段代码是一个内核线程函数，用于管理一个后备设备的脏数据回写任务。它不断检查是否需要停止，如果不需要，
+ * 则执行回写操作并计算已写入的页面数。如果在一定时间内没有新的写入，且闲置时间超过设定的最大值，线程将自动退出。
+ * 同时，这个函数还定期通过设置定时器来进行睡眠，从而不会一直占用CPU资源，而是在指定的间隔后被唤醒继续执行任务。
+ * 此外，它还会响应系统的冻结请求，使得线程能在系统需要时被正确地冻结。
  */
 int bdi_writeback_task(struct bdi_writeback *wb)
 {
@@ -1345,6 +1570,12 @@ int bdi_writeback_task(struct bdi_writeback *wb)
  */
 /*
  * 为所有后备设备安排回写。这是执行WB_SYNC_NONE模式的回写，对于完整性回写，请查看bdi_sync_writeback()。
+ * bdi_writeback_all - 为所有后备设备计划进行回写操作。此操作执行非同步回写模式，
+ * 如果需要进行数据完整性保证的回写，请使用 bdi_sync_writeback() 函数。
+ */
+/*
+ * 为所有的后备设备（如硬盘驱动器等）安排脏数据的回写操作。此函数特别用于执行非同步回写，即回写操作不会等待数据完全写入磁盘
+ * 即可返回。这种模式适用于不需要立即保证数据完整性的场景。如果需要确保数据的完整性，应使用 bdi_sync_writeback() 函数。
  */
 static void bdi_writeback_all(struct super_block *sb, long nr_pages)
 {
@@ -1375,6 +1606,12 @@ static void bdi_writeback_all(struct super_block *sb, long nr_pages)
  */
 /*
  * 启动`nr_pages'页面的回写。如果`nr_pages'为零，回写所有页面。
+ * wakeup_flusher_threads - 启动指定数量页面的回写。如果指定的页面数为零，表示需要回写所有脏页面。
+ */
+/*
+ * 根据提供的页面数来启动回写操作。如果传入的页面数为零，则系统将自动计算所有未稳定的NFS页面和文件系统的脏页面，
+ * 然后对这些页面进行回写。这样的设计允许灵活地根据当前系统状态决定回写的范围，从而优化存储设备的I/O性能和系统
+ * 的整体响应速度。
  */
 void wakeup_flusher_threads(long nr_pages)
 {
@@ -1386,24 +1623,38 @@ void wakeup_flusher_threads(long nr_pages)
 	bdi_writeback_all(NULL, nr_pages);
 }
 
+/*
+ * block_dump___mark_inode_dirty - 标记inode为脏，并在系统日志中记录相关信息。
+ * @inode: 需要标记为脏的inode
+ *
+ * 如果inode的i_ino不为零或其超级块的s_id不是"bdev"，则获取inode的别名dentry，
+ * 并打印关于inode变脏的调试信息到系统日志。这通常用于跟踪和调试文件系统活动。
+ */
+/*
+ * 定义了一个函数 block_dump___mark_inode_dirty，该函数用于标记 inode 为脏并打印相关的调试信息。
+ * 这通常在文件系统中某个文件（由 inode 表示）被修改时调用，以帮助开发者跟踪文件系统的状态变化。
+ */
 static noinline void block_dump___mark_inode_dirty(struct inode *inode)
 {
+	// 如果inode的索引节点号不为0或文件系统标识不是"bdev"
 	if (inode->i_ino || strcmp(inode->i_sb->s_id, "bdev")) {
-		struct dentry *dentry;
-		const char *name = "?";
+		struct dentry *dentry;  // 目录项变量
+		const char *name = "?";  // 默认文件名
 
+		// 找到与inode关联的dentry
 		dentry = d_find_alias(inode);
 		if (dentry) {
-			spin_lock(&dentry->d_lock);
-			name = (const char *) dentry->d_name.name;
+			spin_lock(&dentry->d_lock);  // 对dentry进行加锁
+			name = (const char *) dentry->d_name.name;  // 获取文件名
 		}
+		// 打印inode变脏的信息到内核调试日志
 		printk(KERN_DEBUG
-		       "%s(%d): dirtied inode %lu (%s) on %s\n",
-		       current->comm, task_pid_nr(current), inode->i_ino,
-		       name, inode->i_sb->s_id);
+					"%s(%d): dirtied inode %lu (%s) on %s\n",
+					current->comm, task_pid_nr(current), inode->i_ino,
+					name, inode->i_sb->s_id);
 		if (dentry) {
-			spin_unlock(&dentry->d_lock);
-			dput(dentry);
+			spin_unlock(&dentry->d_lock);  // 解锁
+			dput(dentry);  // 释放dentry的引用
 		}
 	}
 }
@@ -1435,78 +1686,121 @@ static noinline void block_dump___mark_inode_dirty(struct inode *inode)
  * page->mapping->host, so the page-dirtying time is recorded in the internal
  * blockdev inode.
  */
+/*
+ * __mark_inode_dirty - 内部函数
+ * @inode: 要标记的inode
+ * @flags: 脏的类型（例如：I_DIRTY_SYNC）
+ * 将一个inode标记为脏。调用者应使用mark_inode_dirty或mark_inode_dirty_sync。
+ *
+ * 将inode放置在超级块的脏列表上。
+ *
+ * 注意！我们无条件地标记它为脏，但只有当它被哈希或者它引用了一个块设备时才将其移动到脏列表上。
+ * 如果它未被哈希，则即使稍后被哈希，它也永远不会被添加到脏列表上，因为它已经被标记为脏了。
+ *
+ * 简而言之，在你开始标记它们为脏之前，确保你已经哈希了任何inodes。
+ *
+ * 对于I_DIRTY_PAGES情况，这个函数必须是原子的——在几个地方set_page_dirty()是在自旋锁下被调用的。
+ *
+ * 注意对于块设备，inode->dirtied_when表示块特殊inode（如/dev/hda1）本身的脏时间。
+ * 而内核内部块设备inode的->dirtied_when字段代表块设备页面的脏时间。
+ * 这就是为什么对于I_DIRTY_PAGES我们总是使用page->mapping->host，这样页面脏时间就记录在内部块设备inode中。
+ */
+/*
+ * 定义了一个核心函数，__mark_inode_dirty，用于将指定的 inode 标记为脏，并根据情况将其添加到相应的超级块的脏列表中。
+ * 该函数在标记 inode 为脏时考虑了多种情况，确保了在多线程环境中对 inode 状态的正确管理和更新。
+ * 同时，它也处理了特殊情况，如块设备的 inode 和未哈希的 inode，确保只有有效的和需要的 inode 被加入到脏列表中。
+ */
 void __mark_inode_dirty(struct inode *inode, int flags)
 {
-	struct super_block *sb = inode->i_sb;
+	struct super_block *sb = inode->i_sb;	// 获取inode所属的超级块
 
 	/*
 	 * Don't do this for I_DIRTY_PAGES - that doesn't actually
 	 * dirty the inode itself
 	 */
+	 /*
+   * 对I_DIRTY_PAGES不执行操作，因为这并不实际脏化inode本身
+   */
 	if (flags & (I_DIRTY_SYNC | I_DIRTY_DATASYNC)) {
+		// 如果超级块有dirty_inode操作，则调用之
 		if (sb->s_op->dirty_inode)
-			sb->s_op->dirty_inode(inode);
+			sb->s_op->dirty_inode(inode);	// 调用超级块的dirty_inode操作
 	}
 
 	/*
 	 * make sure that changes are seen by all cpus before we test i_state
 	 * -- mikulas
 	 */
-	smp_mb();
+	/*
+   * 确保在我们测试i_state之前，所有的CPU都能看到更改
+   */
+	smp_mb();	// 执行内存屏障，确保内存操作的可见性
 
 	/* avoid the locking if we can */
+	/* 如果可以的话，避免加锁 */
 	if ((inode->i_state & flags) == flags)
-		return;
+		return;	// 如果inode的状态已经包含了所有指定的标志，则直接返回
 
 	if (unlikely(block_dump))
-		block_dump___mark_inode_dirty(inode);
+		block_dump___mark_inode_dirty(inode);	// 如果启用了块转储，则记录inode的脏信息
 
-	spin_lock(&inode_lock);
+	spin_lock(&inode_lock);	// 加锁inode锁
 	if ((inode->i_state & flags) != flags) {
-		const int was_dirty = inode->i_state & I_DIRTY;
+		const int was_dirty = inode->i_state & I_DIRTY;	// 检查inode是否已经标记为脏
 
-		inode->i_state |= flags;
+		inode->i_state |= flags;	// 更新inode状态，添加脏标志
 
 		/*
 		 * If the inode is being synced, just update its dirty state.
 		 * The unlocker will place the inode on the appropriate
 		 * superblock list, based upon its state.
 		 */
+		/*
+     * 如果inode正在同步，只更新它的脏状态。
+     * 解锁者将根据inode的状态将其放置在适当的超级块列表上。
+     */
 		if (inode->i_state & I_SYNC)
-			goto out;
+			goto out;	// 如果inode处于同步中，则跳过后续操作
 
 		/*
 		 * Only add valid (hashed) inodes to the superblock's
 		 * dirty list.  Add blockdev inodes as well.
 		 */
-		if (!S_ISBLK(inode->i_mode)) {
+		/*
+     * 只将有效（已哈希）的inodes添加到超级块的脏列表上。块设备的inodes也一样。
+     */
+		if (!S_ISBLK(inode->i_mode)) {	// 如果不是块设备inode
 			if (hlist_unhashed(&inode->i_hash))
-				goto out;
+				goto out;	// 如果inode未哈希，则跳过
 		}
 		if (inode->i_state & (I_FREEING|I_CLEAR))
-			goto out;
+			goto out;	// 如果inode处于释放或清除状态，则跳过
 
 		/*
 		 * If the inode was already on b_dirty/b_io/b_more_io, don't
 		 * reposition it (that would break b_dirty time-ordering).
 		 */
-		if (!was_dirty) {
+		/*
+     * 如果inode已经在b_dirty/b_io/b_more_io上，不要重新定位它（这将打乱b_dirty的时间顺序）。
+     */
+		if (!was_dirty) {	// 如果inode之前未标记为脏
 			struct bdi_writeback *wb = &inode_to_bdi(inode)->wb;
 			struct backing_dev_info *bdi = wb->bdi;
 
+			// 检查后备设备信息（BDI）是否支持回写脏数据并且已注册
 			if (bdi_cap_writeback_dirty(bdi) &&
 			    !test_bit(BDI_registered, &bdi->state)) {
-				WARN_ON(1);
+				WARN_ON(1);	// 如果BDI未注册，则发出警告
 				printk(KERN_ERR "bdi-%s not registered\n",
 								bdi->name);
 			}
 
-			inode->dirtied_when = jiffies;
-			list_move(&inode->i_list, &wb->b_dirty);
+			inode->dirtied_when = jiffies;	// 记录脏时间
+			list_move(&inode->i_list, &wb->b_dirty);	// 将inode移动到脏列表
 		}
 	}
 out:
-	spin_unlock(&inode_lock);
+	spin_unlock(&inode_lock);	// 解锁inode锁
 }
 EXPORT_SYMBOL(__mark_inode_dirty);
 
@@ -1527,6 +1821,25 @@ EXPORT_SYMBOL(__mark_inode_dirty);
  * on the writer throttling path, and we get decent balancing between many
  * throttled threads: we don't want them all piling up on inode_sync_wait.
  */
+/*
+ * 写出一个超级块的脏inode列表。根据sync_mode的设置，可能会在没有inode、所有inode或最后一个inode上执行等待。
+ *
+ * 如果older_than_this不为NULL，那么只写出那些在*older_than_this之前首次变脏的inode。
+ *
+ * 如果`bdi`非零，那么我们被要求回写一个特定的队列。
+ * 这个函数假设块设备超级块的inode由多个队列支持，因此搜索所有inode。
+ * 对于其他超级块，假设所有inode由同一个队列支持。
+ *
+ * 被写的inodes被停放在bdi->b_io上。它们在被选中写入时被移回bdi->b_dirty。
+ * 这样，就不会在写入限制路径上遗漏任何inode，我们可以在许多受限的线程之间获得良好的平衡：
+ * 我们不希望它们都堆积在inode_sync_wait上。
+ */
+/*
+ * 这段代码主要是用来处理超级块中所有脏inode的写回操作。它在写回过程中确保了数据的完整性，即确保所有的脏数据都被正确地写入磁盘。
+ * 通过锁的使用保证了操作的原子性，防止了在数据写回过程中的数据不一致问题。同时，这个过程也考虑到了性能，
+ * 通过条件调度（cond_resched）允许其他进程有机会运行，避免了长时间占用CPU导致系统反应迟缓。
+ */
+// 其实就是一个函数先调用bdi_sync_writeback执行写操作，然后再调用该函数用来等待写操作完成
 static void wait_sb_inodes(struct super_block *sb)
 {
 	struct inode *inode, *old_inode = NULL;
@@ -1535,9 +1848,12 @@ static void wait_sb_inodes(struct super_block *sb)
 	 * We need to be protected against the filesystem going from
 	 * r/o to r/w or vice versa.
 	 */
-	WARN_ON(!rwsem_is_locked(&sb->s_umount));
+	/*
+	 * 我们需要防止文件系统从只读转换为读写或相反的情况。
+	 */
+	WARN_ON(!rwsem_is_locked(&sb->s_umount));	// 警告如果未锁定超级块的卸载锁
 
-	spin_lock(&inode_lock);
+	spin_lock(&inode_lock);	// 锁定inode锁
 
 	/*
 	 * Data integrity sync. Must wait for all pages under writeback,
@@ -1546,16 +1862,22 @@ static void wait_sb_inodes(struct super_block *sb)
 	 * In which case, the inode may not be on the dirty list, but
 	 * we still have to wait for that writeout.
 	 */
+	/*
+	 * 数据完整性同步。必须等待所有处于写回状态的页面，
+	 * 因为可能有页面在我们的同步调用之前就已经变脏，
+	 * 但写出开始在我们写之前。在这种情况下，inode可能不在脏列表上，
+	 * 但我们仍然需要等待那次写出。
+	 */
 	list_for_each_entry(inode, &sb->s_inodes, i_sb_list) {
 		struct address_space *mapping;
 
 		if (inode->i_state & (I_FREEING|I_CLEAR|I_WILL_FREE|I_NEW))
-			continue;
+			continue;	// 跳过正在释放或清理的inode
 		mapping = inode->i_mapping;
 		if (mapping->nrpages == 0)
-			continue;
-		__iget(inode);
-		spin_unlock(&inode_lock);
+			continue;	// 如果没有脏页则跳过
+		__iget(inode);	// 增加inode的引用计数
+		spin_unlock(&inode_lock);	// 解锁inode锁
 		/*
 		 * We hold a reference to 'inode' so it couldn't have
 		 * been removed from s_inodes list while we dropped the
@@ -1564,17 +1886,22 @@ static void wait_sb_inodes(struct super_block *sb)
 		 * under inode_lock. So we keep the reference and iput
 		 * it later.
 		 */
-		iput(old_inode);
+		/*
+		 * 我们持有对'inode'的引用，所以它不可能在我们放开inode_lock时
+		 * 从s_inodes列表中被移除。我们现在不能放回inode，因为我们可能持有最后一个引用，
+		 * 我们不能在持有inode_lock的情况下执行iput。因此我们保留引用，并稍后执行iput。
+		 */
+		iput(old_inode);	// 释放先前的inode
 		old_inode = inode;
 
-		filemap_fdatawait(mapping);
+		filemap_fdatawait(mapping);	// 等待文件映射中所有的写操作完成
 
-		cond_resched();
+		cond_resched();	// 条件调度，允许其他任务运行
 
-		spin_lock(&inode_lock);
+		spin_lock(&inode_lock);	// 重新锁定inode锁
 	}
-	spin_unlock(&inode_lock);
-	iput(old_inode);
+	spin_unlock(&inode_lock);	// 最终解锁inode锁
+	iput(old_inode);	// 释放最后一个处理的inode
 }
 
 /**
@@ -1586,15 +1913,32 @@ static void wait_sb_inodes(struct super_block *sb)
  * for IO completion of submitted IO. The number of pages submitted is
  * returned.
  */
+/**
+ * writeback_inodes_sb - 从给定的超级块中回写脏inode
+ * @sb: 超级块
+ *
+ * 在此超级块上启动一些inode的回写。没有保证会写回多少个inode（如果有的话），
+ * 并且此函数不会等待提交的IO完成。返回提交的页面数。
+ */
+/**
+ * 用来启动超级块中一些inode的回写过程。它首先计算了文件系统中脏页的数量和NFS系统中不稳定页的数量，然后计算出需要写回的总页数。
+ * 这个总页数是脏页数加上不稳定页数再加上总的inode数减去未使用的inode数。函数通过调用 bdi_start_writeback 启动写回过程，
+ * 但不会等待IO完成，也没有保证完成的inode数量。这种设计可以灵活地处理大量的数据，适用于需要快速响应的场景，
+ * 而不是确保所有数据都被写回。
+ */
 void writeback_inodes_sb(struct super_block *sb)
 {
+	// 计算文件系统中脏页的数量
 	unsigned long nr_dirty = global_page_state(NR_FILE_DIRTY);
+	// 计算NFS系统中不稳定页的数量
 	unsigned long nr_unstable = global_page_state(NR_UNSTABLE_NFS);
-	long nr_to_write;
+	long nr_to_write;	// 将要写回的页数
 
+	// 总的要写回的页数包括脏页、不稳定页和总inode的数量减去未使用的inode数量
 	nr_to_write = nr_dirty + nr_unstable +
 			(inodes_stat.nr_inodes - inodes_stat.nr_unused);
 
+	// 从给定的超级块的后备设备开始写回
 	bdi_start_writeback(sb->s_bdi, sb, nr_to_write);
 }
 EXPORT_SYMBOL(writeback_inodes_sb);
@@ -1606,13 +1950,28 @@ EXPORT_SYMBOL(writeback_inodes_sb);
  * Invoke writeback_inodes_sb if no writeback is currently underway.
  * Returns 1 if writeback was started, 0 if not.
  */
+/**
+ * writeback_inodes_sb_if_idle - 如果当前没有进行中的回写，则开始回写
+ * @sb: 超级块
+ *
+ * 如果当前没有回写正在进行，调用writeback_inodes_sb。
+ * 如果启动了回写则返回1，如果没有则返回0。
+ */
+/*
+ * 定义了一个函数 writeback_inodes_sb_if_idle，它用于在没有其他回写操作进行时启动超级块的回写操作。
+ * 函数首先检查超级块关联的后备设备（通过 sb->s_bdi 访问）是否有回写正在进行，如果没有，则调用 writeback_inodes_sb 
+ * 函数来开始回写过程，并返回1表示回写已经启动。如果有回写正在进行，则不进行操作并返回0。
+ * 这种设计适用于避免在回写已经足够频繁的情况下再次触发回写，从而减少系统负载和潜在的写放大。
+ */
 int writeback_inodes_sb_if_idle(struct super_block *sb)
 {
+	// 检查指定的后备设备是否正在进行回写
 	if (!writeback_in_progress(sb->s_bdi)) {
+		// 如果没有回写正在进行，调用writeback_inodes_sb开始回写
 		writeback_inodes_sb(sb);
-		return 1;
+		return 1;	// 回写启动，返回1
 	} else
-		return 0;
+		return 0;	// 回写未启动，返回0
 }
 EXPORT_SYMBOL(writeback_inodes_sb_if_idle);
 
@@ -1623,9 +1982,22 @@ EXPORT_SYMBOL(writeback_inodes_sb_if_idle);
  * This function writes and waits on any dirty inode belonging to this
  * super_block. The number of pages synced is returned.
  */
+/**
+ * sync_inodes_sb - 同步超级块的inode页面
+ * @sb: 超级块
+ *
+ * 这个函数写入并等待属于这个超级块的任何脏inode。返回同步的页面数。
+ */
+/*
+ * 一个专门用于同步一个超级块中所有脏inode的函数 sync_inodes_sb。该函数首先使用 bdi_sync_writeback 函数发起超级块的脏
+ * inode写回操作，该操作会将所有脏inode提交给底层的I/O系统进行异步处理，但此函数本身并不等待这些I/O操作完成。
+ * 接着，通过 wait_sb_inodes 函数等待之前启动的所有I/O操作完成，确保所有的数据都被稳定地写到了存储设备上。
+ */
 void sync_inodes_sb(struct super_block *sb)
 {
+	// 调用bdi_sync_writeback同步写回超级块的脏inode，不等待I/O完成
 	bdi_sync_writeback(sb->s_bdi, sb);
+	// 调用wait_sb_inodes等待所有inode的I/O操作完成
 	wait_sb_inodes(sb);
 }
 EXPORT_SYMBOL(sync_inodes_sb);
@@ -1640,26 +2012,41 @@ EXPORT_SYMBOL(sync_inodes_sb);
  *
  * The caller must either have a ref on the inode or must have set I_WILL_FREE.
  */
+/**
+ * write_inode_now - 立即将一个inode写入磁盘
+ * @inode: 要写入磁盘的inode
+ * @sync: 写入是否应该是同步的
+ *
+ * 如果inode是脏的，这个函数会立即将其提交到磁盘。这主要是由knfsd所需。
+ *
+ * 调用者必须持有inode的引用或者必须已经设置了I_WILL_FREE。
+ */
+/*
+ * 定义了 write_inode_now 函数，其作用是立即将一个脏的inode写入磁盘。该函数接受两个参数：一个 inode 对象和一个布尔值 sync，
+ * 后者指示写入是否应该是同步的。函数首先配置一个 writeback_control 结构体，用以控制写回操作的行为，包括写回的数据量和范围。
+ * 如果inode的映射不支持写回脏数据，则将写回的数据量设置为0，实际上不进行任何写回操作。
+ */
 int write_inode_now(struct inode *inode, int sync)
 {
-	int ret;
+	int ret;  // 用于存储返回值
 	struct writeback_control wbc = {
-		.nr_to_write = LONG_MAX,
-		.sync_mode = sync ? WB_SYNC_ALL : WB_SYNC_NONE,
-		.range_start = 0,
-		.range_end = LLONG_MAX,
+		.nr_to_write = LONG_MAX,  // 设置为尽可能多地写入
+		.sync_mode = sync ? WB_SYNC_ALL : WB_SYNC_NONE,  // 根据sync参数设置同步模式
+		.range_start = 0,  // 写回范围的起始
+		.range_end = LLONG_MAX,  // 写回范围的结束
 	};
 
+	// 如果inode的映射不支持写回脏数据，则设置不写入任何数据
 	if (!mapping_cap_writeback_dirty(inode->i_mapping))
 		wbc.nr_to_write = 0;
 
-	might_sleep();
-	spin_lock(&inode_lock);
-	ret = writeback_single_inode(inode, &wbc);
-	spin_unlock(&inode_lock);
+	might_sleep();  // 在可能睡眠的上下文中调用
+	spin_lock(&inode_lock);  // 获取inode锁
+	ret = writeback_single_inode(inode, &wbc);  // 调用writeback_single_inode进行写回
+	spin_unlock(&inode_lock);  // 释放inode锁
 	if (sync)
-		inode_sync_wait(inode);
-	return ret;
+		inode_sync_wait(inode);  // 如果是同步写入，则等待写入完成
+	return ret;  // 返回操作结果
 }
 EXPORT_SYMBOL(write_inode_now);
 
@@ -1684,9 +2071,13 @@ EXPORT_SYMBOL(write_inode_now);
  *
  * 调用者必须持有一个对inode的引用。
  */
+/*
+ * 定义了 sync_inode 函数，该函数的目的是将指定的inode及其关联的页面写入磁盘。函数接收两个参数：一个 inode 指针和一个 
+ * writeback_control 结构体指针，后者用于控制回写操作的具体行为。
+ */
 int sync_inode(struct inode *inode, struct writeback_control *wbc)
 {
-	int ret;
+	int ret;	// 用于存储函数返回值
 
 	// 锁定inode锁，防止其他进程同时修改
 	spin_lock(&inode_lock);

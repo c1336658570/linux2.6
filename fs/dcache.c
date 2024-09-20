@@ -444,7 +444,7 @@ static struct dentry * __d_find_alias(struct inode *inode, int want_discon)
 		next = tmp->next; // 移动到下一个元素
 		prefetch(next); // 提前取出下一个元素，以提高访问效率
 		alias = list_entry(tmp, struct dentry, d_alias); // 从链表元素获取dentry
-		if (S_ISDIR(inode->i_mode) || !d_unhashed(alias)) { // 如果是目录或别名未被哈希
+		if (S_ISDIR(inode->i_mode) || !d_unhashed(alias)) { // 如果是目录或别名被哈希
 			if (IS_ROOT(alias) &&
 			    (alias->d_flags & DCACHE_DISCONNECTED)) // 如果是根且断开连接
 				discon_alias = alias; // 记录断开连接的别名
